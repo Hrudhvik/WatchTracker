@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WatchTracker</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header id="popupHeader">
+    <div class="p-top">
+      <button id="pBack" class="p-icon-btn hidden" title="Back">&#8592;</button>
+      <div class="p-logo"><div class="p-logo-mark">&#9654;</div><span>WatchTracker</span></div>
+      <div class="p-search-wrap">
+        <input type="text" id="pSearch" placeholder="Search..." autocomplete="off">
+      </div>
+      <div class="p-top-btns">
+        <button id="pAddNew" class="p-icon-btn p-add-new-btn" title="Add Movie / TV Show">+</button>
+        <button id="pSettings" class="p-icon-btn" title="Settings">&#9881;</button>
+        <button id="pClose" class="p-icon-btn" title="Close">&#10005;</button>
+      </div>
+    </div>
+    <!-- TMDB Search bar (hidden until + is clicked) -->
+    <div class="p-tmdb-bar hidden" id="pTmdbBar">
+      <input type="text" id="pTmdbSearch" placeholder="Search TMDB for movies and TV shows..." autocomplete="off">
+    </div>
+    <div class="p-controls" id="pControls">
+      <div class="p-type-toggle">
+        <button class="p-type active" data-type="all">All</button>
+        <button class="p-type" data-type="movie">Movies</button>
+        <button class="p-type" data-type="tv">TV</button>
+      </div>
+      <div class="p-status-dd" id="pStatusDD">
+        <button class="p-status-pill" id="pStatusBtn">
+          <span class="p-status-dot" id="pStatusDot"></span>
+          <span id="pStatusLabel">Watching</span>
+          <span class="p-dd-arrow">&#9662;</span>
+        </button>
+        <div class="p-dd-menu hidden" id="pStatusMenu">
+          <div class="p-dd-item active" data-val="watching"><span class="p-dd-dot" style="background:#00b894"></span>Watching</div>
+          <div class="p-dd-item" data-val="completed"><span class="p-dd-dot" style="background:#6c5ce7"></span>Completed</div>
+          <div class="p-dd-item" data-val="on_hold"><span class="p-dd-dot" style="background:#fdcb6e"></span>On-Hold</div>
+          <div class="p-dd-item" data-val="dropped"><span class="p-dd-dot" style="background:#e17055"></span>Dropped</div>
+          <div class="p-dd-item" data-val="plan_to_watch"><span class="p-dd-dot" style="background:#a29bfe"></span>Plan to Watch</div>
+          <div class="p-dd-item" data-val="all"><span class="p-dd-dot" style="background:linear-gradient(135deg,#00b894,#6c5ce7,#e17055)"></span>All</div>
+        </div>
+      </div>
+      <div class="p-sort-dd" id="pSortDD">
+        <button class="p-sort-btn" id="pSortBtn">
+          <span id="pSortLabel">Updated</span>
+          <span class="p-dd-arrow">&#9662;</span>
+        </button>
+        <div class="p-dd-menu hidden" id="pSortMenu">
+          <div class="p-dd-item active" data-val="dateUpdated">Updated</div>
+          <div class="p-dd-item" data-val="dateAdded">Added</div>
+          <div class="p-dd-item" data-val="title">A-Z</div>
+          <div class="p-dd-item" data-val="year">Year</div>
+        </div>
+      </div>
+      <div class="p-view-btns">
+        <button class="p-view active" data-view="list" title="List">&#9776;</button>
+        <button class="p-view" data-view="card" title="Card">&#9744;</button>
+        <button class="p-view" data-view="grid" title="Grid">&#9638;</button>
+      </div>
+    </div>
+  </header>
+  <main id="pList"></main>
+  <div id="pEmpty" class="p-empty hidden">
+    <p>No items</p>
+  </div>
+  <footer class="p-footer">
+    <button id="pOpenTab">Open Full Dashboard &#8599;</button>
+  </footer>
+  <script src="tmdb.js"></script>
+  <script src="store.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
