@@ -105,64 +105,26 @@ const Store = {
   },
 
   removeDiaryEntry(tmdbId, timestamp) {
-    if (timestamp) {
-      this._data.diary = this._data.diary.filter(d => !(d.tmdbId === tmdbId && d.timestamp === timestamp));
-    } else {
-      const idx = this._data.diary.findIndex(d => d.tmdbId === tmdbId);
-      if (idx !== -1) this._data.diary.splice(idx, 1);
-    }
+    if (timestamp) { this._data.diary = this._data.diary.filter(d => !(d.tmdbId === tmdbId && d.timestamp === timestamp)); }
+    else { const i = this._data.diary.findIndex(d => d.tmdbId === tmdbId); if (i !== -1) this._data.diary.splice(i, 1); }
     chrome.storage.local.set({ diary: this._data.diary });
   },
+  updateDiaryEntry(ts, u) { const i = this._data.diary.findIndex(d => d.timestamp === ts); if (i >= 0) { Object.assign(this._data.diary[i], u); chrome.storage.local.set({ diary: this._data.diary }); } },
+  getDiaryEntry(ts) { return this._data.diary.find(d => d.timestamp === ts); },
+  getUserRating(id, t) { const e = this._data.diary.filter(d => d.tmdbId === id && d.type === t && d.rating); return e.length ? e[0].rating : null; },
+  getSeasonRatings(id) { const m = {}; this._data.diary.filter(d => d.tmdbId === id && d.type === 'tv' && d.rating && d.season).forEach(e => { if (!m[e.season]) m[e.season] = e.rating; }); return m; },
+  getAvgUserRating(id, t) { const e = this._data.diary.filter(d => d.tmdbId === id && d.type === t && d.rating); return e.length ? e.reduce((s, d) => s + d.rating, 0) / e.length : null; },
 
-  updateDiaryEntry(timestamp, updates) {
-    const idx = this._data.diary.findIndex(d => d.timestamp === timestamp);
-    if (idx === -1) return;
-    Object.assign(this._data.diary[idx], updates);
-    chrome.storage.local.set({ diary: this._data.diary });
-  },
-
-  getDiaryEntry(timestamp) {
-    return this._data.diary.find(d => d.timestamp === timestamp);
-  },
-
-  getUserRating(tmdbId, type) {
-    const entries = this._data.diary.filter(d => d.tmdbId === tmdbId && d.type === type && d.rating);
-    return entries.length ? entries[0].rating : null;
-  },
-
-  getSeasonRatings(tmdbId) {
-    const entries = this._data.diary.filter(d => d.tmdbId === tmdbId && d.type === 'tv' && d.rating && d.season);
-    const byS = {};
-    entries.forEach(e => { if (!byS[e.season]) byS[e.season] = e.rating; });
-    return byS;
-  },
-
-  getAvgUserRating(tmdbId, type) {
-    const entries = this._data.diary.filter(d => d.tmdbId === tmdbId && d.type === type && d.rating);
-    if (!entries.length) return null;
-    return entries.reduce((s, e) => s + e.rating, 0) / entries.length;
-  },
-
-  // ─── Activity Log ───
   getActivity() { return this._data.activity; },
+  addActivity(entry) { this._data.activity.unshift(entry); if (this._data.activity.length > 100) this._data.activity = this._data.activity.slice(0, 100); chrome.storage.local.set({ activity: this._data.activity }); },
 
-  addActivity(entry) {
-    // entry: { tmdbId, title, type, posterPath, action, detail, timestamp }
-    this._data.activity.unshift(entry);
-    // Keep last 100
-    if (this._data.activity.length > 100) this._data.activity = this._data.activity.slice(0, 100);
-    chrome.storage.local.set({ activity: this._data.activity });
-  },
-
-  getAll() {
-    return [...this._data.movies.map(m => ({ ...m, mediaType: 'movie' })), ...this._data.tvshows.map(t => ({ ...t, mediaType: 'tv' }))];
-  },
-  deleteMovie(tmdbId) { this.removeMovie(tmdbId); },
-  deleteTvShow(tmdbId) { this.removeTvShow(tmdbId); },
+  getAll() { return [...this._data.movies.map(m => ({ ...m, mediaType: 'movie' })), ...this._data.tvshows.map(t => ({ ...t, mediaType: 'tv' }))]; },
+  deleteMovie(id) { this.removeMovie(id); },
+  deleteTvShow(id) { this.removeTvShow(id); },
   getTheme() { return this._data.theme; },
-  setTheme(theme) { this._data.theme = theme; chrome.storage.local.set({ theme }); },
+  setTheme(t) { this._data.theme = t; chrome.storage.local.set({ theme: t }); },
   getPopupPrefs() { return this._data.popupPrefs; },
-  setPopupPrefs(prefs) { this._data.popupPrefs = prefs; chrome.storage.local.set({ popupPrefs: prefs }); },
+  setPopupPrefs(p) { this._data.popupPrefs = p; chrome.storage.local.set({ popupPrefs: p }); },
 
   // ─── Export/Import ───
   exportAll() {

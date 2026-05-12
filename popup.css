@@ -242,73 +242,22 @@ html, body {
 .p-score { font-size: 11px; color: var(--ptext-2); margin-top: 1px; }
 
 /* ─── Grid view ─── */
-.p-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 8px 10px; }
-.p-grid-card { cursor: pointer; transition: transform 0.12s; overflow: hidden; }
+.p-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 8px 10px; }
+.p-grid-card { cursor: pointer; transition: transform 0.12s; }
 .p-grid-card:hover { transform: translateY(-2px); }
 .p-grid-poster {
-  border-radius: 5px; overflow: hidden;
+  border-radius: 4px; overflow: hidden;
   aspect-ratio: 2/3; background: var(--pbg-2); position: relative;
 }
 .p-grid-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.p-grid-poster .p-poster-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+.p-grid-poster .p-poster-ph { font-size: 10px; }
 .p-grid-bar { position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: rgba(0,0,0,0.4); }
 .p-grid-bar-fill { height: 100%; }
 .p-grid-title {
   font-size: 10px; font-weight: 500; color: var(--ptext-1);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  margin-top: 4px; padding: 0 1px;
+  margin-top: 3px; padding: 0 1px;
 }
-
-/* ─── Card View (popup) ─── */
-.pc-list { display: flex; flex-direction: column; gap: 6px; padding: 6px 10px; }
-.pc-card {
-  display: flex; gap: 10px; padding: 10px;
-  background: var(--pbg-1); border: 1px solid var(--pborder);
-  border-radius: 10px; cursor: pointer; transition: all 0.15s;
-  align-items: stretch;
-}
-.pc-card:hover { background: var(--pbg-2); border-color: rgba(255,255,255,0.12); }
-.pc-poster {
-  width: 56px; height: 84px; flex-shrink: 0;
-  border-radius: 6px; overflow: hidden; background: var(--pbg-2);
-}
-.pc-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.pc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.pc-top { display: flex; align-items: center; gap: 6px; }
-.pc-title {
-  font-size: 13px; font-weight: 600; color: var(--ptext-0);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  flex: 1; min-width: 0;
-}
-.pc-type {
-  font-size: 9px; font-weight: 700; text-transform: uppercase;
-  padding: 2px 6px; border-radius: 3px; flex-shrink: 0; letter-spacing: 0.3px;
-}
-.pc-type-movie { background: rgba(108,92,231,0.2); color: var(--paccent-l); }
-.pc-type-tv { background: rgba(0,184,148,0.2); color: var(--pwatching); }
-.pc-meta { font-size: 10px; color: var(--ptext-2); }
-.pc-prog { display: flex; align-items: center; gap: 6px; margin-top: 1px; }
-.pc-prog-bar { flex: 1; height: 4px; background: var(--pbg-3); border-radius: 2px; overflow: hidden; }
-.pc-prog-fill { height: 100%; border-radius: 2px; }
-.pc-prog-num { font-size: 10px; color: var(--ptext-2); font-weight: 600; white-space: nowrap; }
-.pc-bottom { display: flex; align-items: center; gap: 6px; margin-top: auto; }
-.pc-status {
-  font-size: 9px; font-weight: 600; padding: 2px 8px;
-  border-radius: 4px; letter-spacing: 0.2px;
-}
-.pc-st-watching { background: rgba(0,184,148,0.15); color: var(--pwatching); }
-.pc-st-completed { background: rgba(108,92,231,0.15); color: var(--pcompleted); }
-.pc-st-on_hold { background: rgba(253,203,110,0.15); color: var(--phold); }
-.pc-st-dropped { background: rgba(225,112,85,0.15); color: var(--pdropped); }
-.pc-st-plan_to_watch { background: rgba(116,185,255,0.15); color: var(--pplan); }
-.pc-rw { font-size: 10px; color: var(--phold); font-weight: 500; }
-.pc-score {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  flex-shrink: 0; padding-left: 10px; border-left: 1px solid var(--pborder);
-  min-width: 40px;
-}
-.pc-score-num { font-size: 16px; font-weight: 700; color: var(--phold); line-height: 1; }
-.pc-score-lbl { font-size: 8px; color: var(--ptext-2); text-transform: uppercase; letter-spacing: 0.3px; margin-top: 2px; }
 
 /* ─── TMDB Search Results ─── */
 .p-search-item {
@@ -454,3 +403,85 @@ html, body {
 #pList::-webkit-scrollbar { width: 4px; }
 #pList::-webkit-scrollbar-track { background: transparent; }
 #pList::-webkit-scrollbar-thumb { background: var(--pbg-3); border-radius: 2px; }
+
+/* ─── Diary Button ─── */
+.p-diary-btn {
+  font-size: 11px !important; font-weight: 700 !important;
+  background: var(--paccent) !important; color: #fff !important;
+  border-color: var(--paccent) !important; letter-spacing: 0.5px;
+}
+.p-diary-btn:hover { opacity: 0.85; }
+.pd-btn-diary { background: rgba(108,92,231,0.12); color: var(--paccent-l); border: 1px solid rgba(108,92,231,0.2); }
+.pd-btn-diary:hover { background: rgba(108,92,231,0.25); }
+
+/* ─── Popup Diary Timeline ─── */
+.pd-diary-tl { padding: 6px 10px; }
+.pd-tl-day { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.pd-tl-day:last-child { border-bottom: none; }
+.pd-tl-marker { width: 40px; flex-shrink: 0; text-align: center; padding-top: 2px; }
+.pd-tl-num { font-size: 20px; font-weight: 800; color: var(--ptext-0); line-height: 1; font-family: monospace; }
+.pd-tl-mon { font-size: 9px; color: var(--ptext-2); text-transform: uppercase; letter-spacing: 0.3px; }
+.pd-tl-dn { font-size: 9px; color: var(--ptext-2); }
+.pd-tl-entries { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pd-tl-entry { display: flex; gap: 8px; padding: 7px 8px; background: var(--pbg-1); border: 1px solid var(--pborder); border-radius: 8px; cursor: pointer; transition: all 0.12s; align-items: center; }
+.pd-tl-entry:hover { background: var(--pbg-2); border-color: rgba(255,255,255,0.12); }
+.pd-tl-poster { width: 32px; height: 48px; flex-shrink: 0; border-radius: 4px; overflow: hidden; background: var(--pbg-2); }
+.pd-tl-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pd-tl-info { flex: 1; min-width: 0; }
+.pd-tl-title { font-size: 12px; font-weight: 600; color: var(--ptext-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-tl-meta { font-size: 10px; color: var(--ptext-2); margin-top: 1px; }
+.pd-tl-notes { font-size: 10px; color: var(--ptext-2); font-style: italic; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-tl-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
+.pd-tl-edit {
+  padding: 3px 10px; background: var(--pbg-2); border: 1px solid var(--pborder);
+  border-radius: 5px; color: var(--ptext-1); font-size: 10px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: all 0.12s;
+}
+.pd-tl-edit:hover { background: rgba(108,92,231,0.15); color: var(--paccent-l); border-color: var(--paccent); }
+.pd-tl-del {
+  padding: 3px 8px; background: none; border: 1px solid transparent;
+  border-radius: 5px; color: var(--ptext-2); font-size: 10px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: all 0.12s;
+}
+.pd-tl-del:hover { background: rgba(225,112,85,0.12); color: var(--pdropped); border-color: rgba(225,112,85,0.3); }
+
+/* ─── Popup Diary Log/Edit Modal ─── */
+.pdl-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.7); display: flex; align-items: flex-start; justify-content: center; padding-top: 20px; }
+.pdl-box { width: 390px; max-height: calc(100vh - 40px); overflow-y: auto; background: var(--pbg-1); border: 1px solid var(--pborder); border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,0.6); }
+.pdl-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--pborder); font-size: 14px; font-weight: 700; color: var(--ptext-0); }
+.pdl-close { background: none; border: none; color: var(--ptext-2); font-size: 16px; cursor: pointer; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: 5px; }
+.pdl-close:hover { background: var(--pbg-2); color: var(--ptext-0); }
+.pdl-body { padding: 12px 14px; }
+.pdl-hero { display: flex; gap: 10px; margin-bottom: 12px; }
+.pdl-poster { width: 50px; flex-shrink: 0; border-radius: 5px; overflow: hidden; background: var(--pbg-2); }
+.pdl-poster img { width: 100%; display: block; }
+.pdl-name { font-size: 14px; font-weight: 700; color: var(--ptext-0); }
+.pdl-form { display: flex; flex-direction: column; gap: 8px; }
+.pdl-row { display: flex; align-items: center; gap: 8px; }
+.pdl-row label { font-size: 11px; font-weight: 600; color: var(--ptext-2); min-width: 48px; flex-shrink: 0; text-transform: uppercase; letter-spacing: 0.3px; }
+.pdl-row2 { display: flex; gap: 8px; }
+.pdl-inp { flex: 1; padding: 6px 8px; background: var(--pbg-2); border: 1px solid var(--pborder); border-radius: 5px; color: var(--ptext-0); font-size: 12px; font-family: inherit; outline: none; }
+.pdl-inp:focus { border-color: var(--paccent); }
+.pdl-ta { resize: vertical; min-height: 36px; }
+.pdl-inp::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
+.pdl-save { width: 100%; padding: 8px; background: var(--paccent); color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; margin-top: 4px; }
+.pdl-save:hover { opacity: 0.85; }
+.pdl-back { padding: 8px 14px; background: var(--pbg-2); color: var(--ptext-1); border: 1px solid var(--pborder); border-radius: 6px; font-size: 12px; cursor: pointer; }
+.pdl-hist { margin-top: 12px; border-top: 1px solid var(--pborder); padding-top: 8px; }
+.pdl-hist-head { font-size: 12px; font-weight: 600; color: var(--ptext-1); margin-bottom: 6px; }
+.pdl-hrow { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--pbg-0); border: 1px solid var(--pborder); border-radius: 6px; font-size: 11px; margin-bottom: 4px; }
+.pdl-hinfo { flex: 1; min-width: 0; }
+.pdl-hdate { font-weight: 600; color: var(--ptext-0); }
+.pdl-hact { color: var(--ptext-2); }
+.pdl-hedit {
+  padding: 2px 10px; background: var(--pbg-2); border: 1px solid var(--pborder);
+  border-radius: 4px; color: var(--ptext-1); font-size: 10px; font-weight: 600;
+  cursor: pointer; flex-shrink: 0; font-family: inherit;
+}
+.pdl-hedit:hover { background: rgba(108,92,231,0.15); color: var(--paccent-l); border-color: var(--paccent); }
+.pdl-hdel {
+  padding: 2px 8px; background: none; border: 1px solid transparent;
+  border-radius: 4px; color: var(--ptext-2); font-size: 10px; font-weight: 500;
+  cursor: pointer; flex-shrink: 0; font-family: inherit;
+}
+.pdl-hdel:hover { color: var(--pdropped); background: rgba(225,112,85,0.1); }

@@ -29,6 +29,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('pClose').addEventListener('click', () => window.close());
 
+  // Diary view
+  document.getElementById('pDiaryBtn').addEventListener('click', () => enterDiaryMode());
+
   // Back — returns to list from any sub-view
   document.getElementById('pBack').addEventListener('click', goBackToList);
 
@@ -219,11 +222,94 @@ function goBackToList() {
   document.getElementById('pTmdbBar').classList.add('hidden');
   document.getElementById('pSearch').parentElement.classList.remove('hidden');
   document.getElementById('pAddNew').classList.remove('hidden');
+  document.getElementById('pDiaryBtn').classList.remove('hidden');
   document.getElementById('pTmdbSearch').value = '';
   document.getElementById('pSearch').value = '';
   pQuery = '';
   document.getElementById('pEmpty').classList.add('hidden');
   renderList();
+}
+
+function enterDiaryMode() {
+  pMode = 'diary';
+  document.getElementById('pBack').classList.remove('hidden');
+  document.getElementById('pControls').classList.add('hidden');
+  document.getElementById('pTmdbBar').classList.add('hidden');
+  document.getElementById('pSearch').parentElement.classList.add('hidden');
+  document.getElementById('pAddNew').classList.add('hidden');
+  document.getElementById('pDiaryBtn').classList.add('hidden');
+  document.getElementById('pEmpty').classList.add('hidden');
+  renderPopupDiary();
+}
+
+function renderPopupDiary() {
+  const el = document.getElementById('pList');
+  const diary = Store.getDiary();
+  if (!diary.length) {
+    el.innerHTML = '<div class="p-search-msg">No diary entries yet. Log a watch from any title\'s detail page.</div>';
+    return;
+  }
+
+  const actLabels = { completed:'Completed', rewatch:'Rewatched', watched:'Watched', watched_episodes:'Watched eps', started:'Started', session:'Session' };
+
+  // Group by date
+  const grouped = {};
+  diary.forEach(e => { const d = e.date || 'Unknown'; if (!grouped[d]) grouped[d] = []; grouped[d].push(e); });
+
+  let html = '<div class="pd-diary-tl">';
+  Object.keys(grouped).forEach(date => {
+    const dateObj = new Date(date + 'T12:00:00');
+    const valid = !isNaN(dateObj.getTime());
+    const dayNum = valid ? dateObj.getDate() : '?';
+    const mon = valid ? dateObj.toLocaleDateString('en-US', { month: 'short' }) : '';
+    const dayName = valid ? dateObj.toLocaleDateString('en-US', { weekday: 'short' }) : '';
+
+    html += `<div class="pd-tl-day"><div class="pd-tl-marker"><div class="pd-tl-num">${dayNum}</div><div class="pd-tl-mon">${mon}</div><div class="pd-tl-dn">${dayName}</div></div><div class="pd-tl-entries">`;
+
+    grouped[date].forEach(e => {
+      const poster = e.posterPath ? `https://image.tmdb.org/t/p/w92${e.posterPath}` : '';
+      const act = actLabels[e.action] || e.action || 'Logged';
+      const rating = e.rating ? ` · ★ ${e.rating}/10` : '';
+      const season = e.season ? ` · S${e.season}` : '';
+
+      html += `<div class="pd-tl-entry" data-tmdb="${e.tmdbId}" data-type="${e.type}">
+        <div class="pd-tl-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">${e.type==='movie'?'MOV':'TV'}</div>`}</div>
+        <div class="pd-tl-info">
+          <div class="pd-tl-title">${esc(e.title)}</div>
+          <div class="pd-tl-meta">${act}${season}${rating}</div>
+          ${e.notes ? `<div class="pd-tl-notes">${esc(e.notes).substring(0,60)}</div>` : ''}
+        </div>
+        <div class="pd-tl-actions">
+          <button class="pd-tl-edit" data-ts="${e.timestamp||''}">Edit</button>
+          <button class="pd-tl-del" data-tmdb="${e.tmdbId}" data-ts="${e.timestamp||''}">Remove</button>
+        </div>
+      </div>`;
+    });
+
+    html += '</div></div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
+
+  // Bind clicks
+  el.querySelectorAll('.pd-tl-entry').forEach(entry => {
+    entry.addEventListener('click', (ev) => {
+      if (ev.target.closest('.pd-tl-edit') || ev.target.closest('.pd-tl-del')) return;
+      showDetail(parseInt(entry.dataset.tmdb), entry.dataset.type);
+    });
+  });
+  el.querySelectorAll('.pd-tl-edit').forEach(btn => {
+    btn.addEventListener('click', (ev) => { ev.stopPropagation(); popupEditDiaryEntry(btn.dataset.ts); });
+  });
+  el.querySelectorAll('.pd-tl-del').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (confirm('Remove this entry?')) {
+        Store.removeDiaryEntry(parseInt(btn.closest('.pd-tl-entry').dataset.tmdb), btn.dataset.ts);
+        renderPopupDiary();
+      }
+    });
+  });
 }
 
 function enterTMDBMode() {
@@ -303,47 +389,12 @@ function renderList() {
 
   if (pView === 'grid') {
     el.innerHTML = `<div class="p-grid">${items.map(i => {
-      const img = i.posterPath ? `https://image.tmdb.org/t/p/w342${i.posterPath}` : '';
+      const img = i.posterPath ? `https://image.tmdb.org/t/p/w185${i.posterPath}` : '';
       const pct = getPct(i); const f = fc[i.watchStatus] || 'fill-plan';
       return `<div class="p-grid-card" data-tmdb="${i.tmdbId}" data-type="${i.mediaType}">
         <div class="p-grid-poster">${img ? `<img src="${img}">` : `<div class="p-poster-ph">${i.mediaType==='movie'?'MOV':'TV'}</div>`}
           <div class="p-grid-bar"><div class="p-grid-bar-fill ${f}" style="width:${pct}%"></div></div>
         </div><div class="p-grid-title">${esc(i.title)}</div></div>`;
-    }).join('')}</div>`;
-  } else if (pView === 'card') {
-    const sl = { watching:'Watching', completed:'Completed', on_hold:'On-Hold', dropped:'Dropped', plan_to_watch:'Plan to Watch' };
-    el.innerHTML = `<div class="pc-list">${items.map(i => {
-      const img = i.posterPath ? `https://image.tmdb.org/t/p/w185${i.posterPath}` : '';
-      const pct = getPct(i); const f = fc[i.watchStatus] || 'fill-plan';
-      const score = i.voteAverage ? i.voteAverage.toFixed(1) : '';
-      const meta = i.mediaType === 'movie'
-        ? [i.year, i.runtime ? `${i.runtime}m` : ''].filter(Boolean).join(' · ')
-        : [i.year, `${i.totalSeasons||'?'}S · ${i.totalEpisodes||'?'} Eps`].filter(Boolean).join(' · ');
-      let progHtml = '';
-      if (i.mediaType === 'tv') {
-        const ss = i.seasons||[];
-        const w = ss.reduce((s,x)=>s+(x.episodesWatched||0),0);
-        const t = ss.reduce((s,x)=>s+(x.episodeCount||0),0);
-        progHtml = `<div class="pc-prog"><div class="pc-prog-bar"><div class="pc-prog-fill ${f}" style="width:${pct}%"></div></div><span class="pc-prog-num">${w}/${t}</span></div>`;
-      } else if (i.watchStatus === 'completed') {
-        progHtml = `<div class="pc-prog"><div class="pc-prog-bar"><div class="pc-prog-fill fill-completed" style="width:100%"></div></div></div>`;
-      }
-      return `<div class="pc-card" data-tmdb="${i.tmdbId}" data-type="${i.mediaType}">
-        <div class="pc-poster">${img ? `<img src="${img}">` : `<div class="p-poster-ph">${i.mediaType==='movie'?'MOV':'TV'}</div>`}</div>
-        <div class="pc-body">
-          <div class="pc-top">
-            <span class="pc-title">${esc(i.title)}</span>
-            <span class="pc-type pc-type-${i.mediaType}">${i.mediaType==='movie'?'Movie':'TV'}</span>
-          </div>
-          <div class="pc-meta">${meta}</div>
-          ${progHtml}
-          <div class="pc-bottom">
-            <span class="pc-status pc-st-${i.watchStatus}">${sl[i.watchStatus]||''}</span>
-            ${i.rewatchCount?`<span class="pc-rw">↻${i.rewatchCount}</span>`:''}
-          </div>
-        </div>
-        ${score ? `<div class="pc-score"><span class="pc-score-num">${score}</span><span class="pc-score-lbl">TMDB</span></div>` : ''}
-      </div>`;
     }).join('')}</div>`;
   } else {
     el.innerHTML = items.map(i => {
@@ -483,6 +534,7 @@ function showDetail(tmdbId, mediaType) {
     ${seasonHtml}
     <div class="pd-actions">
       <button class="pd-btn pd-btn-open" id="pdOpenFull">Full Details</button>
+      <button class="pd-btn pd-btn-diary" id="pdDiaryLog">Diary</button>
       <button class="pd-btn pd-btn-remove" id="pdRemove">Remove</button>
     </div>
   </div>`;
@@ -513,6 +565,10 @@ function showDetail(tmdbId, mediaType) {
 
   el.querySelector('#pdOpenFull').addEventListener('click', () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('app.html') + `#detail-${mediaType}-${tmdbId}` }); window.close();
+  });
+
+  el.querySelector('#pdDiaryLog')?.addEventListener('click', () => {
+    popupDiaryLogModal(tmdbId, mediaType, stored.title, stored.posterPath);
   });
 
   el.querySelector('#pdRemove').addEventListener('click', () => {
@@ -645,6 +701,95 @@ async function showTMDBDetail(tmdbId, mediaType) {
   } catch (err) {
     el.innerHTML = `<div class="p-search-msg" style="color:var(--pdropped)">Failed: ${err.message}</div>`;
   }
+}
+
+/* ═══════════════════════════════════════════
+   POPUP DIARY — Log Modal + Edit Modal
+   ═══════════════════════════════════════════ */
+
+function popupDiaryLogModal(tmdbId, mediaType, title, posterPath) {
+  const today = new Date().toISOString().substring(0, 10);
+  const poster = posterPath ? `https://image.tmdb.org/t/p/w185${posterPath}` : '';
+  const isM = mediaType === 'movie';
+  const st = isM ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
+  const sOpts = !isM && st ? (st.seasons||[]).map(s => `<option value="${s.seasonNumber}">S${s.seasonNumber}</option>`).join('') : '';
+
+  // History
+  const entries = Store.getDiary().filter(d => d.tmdbId === tmdbId && d.type === mediaType);
+  const aL = { completed:'Completed', rewatch:'Rewatched', watched:'Watched', watched_episodes:'Watched eps', started:'Started', session:'Session' };
+  const histHtml = entries.length ? `<div class="pdl-hist"><div class="pdl-hist-head">Diary History (${entries.length})</div>${entries.map(de => {
+    const a = aL[de.action]||de.action; const r = de.rating ? ` · ★${de.rating}` : ''; const s = de.season ? ` · S${de.season}` : '';
+    return `<div class="pdl-hrow"><div class="pdl-hinfo"><span class="pdl-hdate">${de.date||'—'}</span> <span class="pdl-hact">${a}${s}${r}</span></div><button class="pdl-hedit" data-ts="${de.timestamp}">Edit</button><button class="pdl-hdel" data-tmdb="${de.tmdbId}" data-ts="${de.timestamp}">Remove</button></div>`;
+  }).join('')}</div>` : '';
+
+  const html = `<div class="pdl-overlay" id="pdlModal"><div class="pdl-box"><div class="pdl-header"><span>Log Diary</span><button class="pdl-close" id="pdlX">&#10005;</button></div><div class="pdl-body">
+    <div class="pdl-hero"><div class="pdl-poster">${poster?`<img src="${poster}">`:`<div class="p-poster-ph">${isM?'MOV':'TV'}</div>`}</div><div><div class="pdl-name">${esc(title)}</div></div></div>
+    <div class="pdl-form">
+      <div class="pdl-row"><label>Date</label><input type="date" id="pdlDate" value="${today}" class="pdl-inp"></div>
+      <div class="pdl-row2">
+        <div class="pdl-row" style="flex:1;"><label>Action</label><select id="pdlAction" class="pdl-inp"><option value="watched">Watched</option><option value="rewatch">Rewatched</option></select></div>
+        <div class="pdl-row" style="flex:1;"><label>Rating</label><select id="pdlRating" class="pdl-inp"><option value="0">— None —</option>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}">★ ${n}/10</option>`).join('')}</select></div>
+      </div>
+      ${!isM ? `<div class="pdl-row"><label>Season</label><select id="pdlSeason" class="pdl-inp"><option value="">All</option>${sOpts}</select></div>` : ''}
+      <div class="pdl-row"><label>Notes</label><textarea id="pdlNotes" class="pdl-inp pdl-ta" rows="2" placeholder="Quick thoughts..."></textarea></div>
+      <button class="pdl-save" id="pdlSave">Save Entry</button>
+    </div>
+    ${histHtml}
+  </div></div></div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+  const m = document.getElementById('pdlModal');
+  const close = () => m.remove();
+  m.querySelector('#pdlX').addEventListener('click', close);
+  m.addEventListener('click', e => { if (e.target === m) close(); });
+
+  m.querySelectorAll('.pdl-hedit').forEach(b => { b.addEventListener('click', () => { close(); popupEditDiaryEntry(b.dataset.ts); }); });
+  m.querySelectorAll('.pdl-hdel').forEach(b => { b.addEventListener('click', () => { if (confirm('Remove?')) { Store.removeDiaryEntry(parseInt(b.dataset.tmdb), b.dataset.ts); close(); popupDiaryLogModal(tmdbId, mediaType, title, posterPath); } }); });
+
+  m.querySelector('#pdlSave').addEventListener('click', () => {
+    const date = m.querySelector('#pdlDate').value; if (!date) return;
+    const action = m.querySelector('#pdlAction').value;
+    const notes = m.querySelector('#pdlNotes').value.trim();
+    const rating = parseInt(m.querySelector('#pdlRating').value) || null;
+    const season = !isM && m.querySelector('#pdlSeason') ? parseInt(m.querySelector('#pdlSeason').value) || null : null;
+    Store.addDiaryEntry({ tmdbId, title, type: mediaType, posterPath, date, action, notes, rating, mood: null, episodes: null, season, timestamp: new Date().toISOString() });
+    close();
+    if (pMode === 'diary') renderPopupDiary();
+    else showDetail(tmdbId, mediaType);
+  });
+}
+
+function popupEditDiaryEntry(timestamp) {
+  const entry = Store.getDiaryEntry(timestamp);
+  if (!entry) return;
+  const isM = entry.type === 'movie';
+
+  const html = `<div class="pdl-overlay" id="pdleModal"><div class="pdl-box"><div class="pdl-header"><span>Edit Entry</span><button class="pdl-close" id="pdleX">&#10005;</button></div><div class="pdl-body"><div class="pdl-form">
+    <div class="pdl-row"><label>Date</label><input type="date" id="pdleDate" value="${entry.date||''}" class="pdl-inp"></div>
+    <div class="pdl-row2">
+      <div class="pdl-row" style="flex:1;"><label>Action</label><select id="pdleAction" class="pdl-inp"><option value="watched" ${entry.action==='watched'?'selected':''}>Watched</option><option value="rewatch" ${entry.action==='rewatch'?'selected':''}>Rewatched</option></select></div>
+      <div class="pdl-row" style="flex:1;"><label>Rating</label><select id="pdleRating" class="pdl-inp"><option value="0">— None —</option>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${entry.rating===n?'selected':''}>★ ${n}/10</option>`).join('')}</select></div>
+    </div>
+    <div class="pdl-row"><label>Notes</label><textarea id="pdleNotes" class="pdl-inp pdl-ta" rows="2">${esc(entry.notes||'')}</textarea></div>
+    <div style="display:flex;gap:6px;"><button class="pdl-save" id="pdleSave" style="flex:1;">Save</button><button class="pdl-back" id="pdleBack">Back</button></div>
+  </div></div></div></div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+  const m = document.getElementById('pdleModal');
+  const close = () => m.remove();
+  m.querySelector('#pdleX').addEventListener('click', close);
+  m.querySelector('#pdleBack').addEventListener('click', () => { close(); if (pMode === 'diary') renderPopupDiary(); });
+
+  m.querySelector('#pdleSave').addEventListener('click', () => {
+    Store.updateDiaryEntry(timestamp, {
+      date: m.querySelector('#pdleDate').value,
+      action: m.querySelector('#pdleAction').value,
+      rating: parseInt(m.querySelector('#pdleRating').value) || null,
+      notes: m.querySelector('#pdleNotes').value.trim(),
+    });
+    close();
+    if (pMode === 'diary') renderPopupDiary();
+  });
 }
 
 /* ─── Helpers ─── */

@@ -232,7 +232,7 @@ const DiaryUI = {
     if (entries.length === 0) {
       container.innerHTML = `
         <div class="diary-empty">
-          <div class="diary-empty-icon">📖</div>
+          <div class="diary-empty-icon" style="font-size:32px;color:var(--text-3);">Diary</div>
           <h3>No diary entries yet</h3>
           <p>Log your first watch session with the <strong>+ Log Entry</strong> button, or entries will appear here as you complete movies and TV shows.</p>
         </div>`;
@@ -298,7 +298,10 @@ const DiaryUI = {
               ${ratingStars ? `<div class="tl-entry-rating">${ratingStars} <span class="tl-rating-num">${e.rating}/10</span></div>` : ''}
               ${e.notes ? `<div class="tl-entry-notes">${esc(e.notes)}</div>` : ''}
             </div>
-            <button class="tl-entry-delete" data-tmdb="${e.tmdbId}" data-ts="${e.timestamp || ''}" title="Delete entry">✕</button>
+            <div class="tl-entry-btns">
+              <button class="tl-btn tl-btn-edit" data-tmdb="${e.tmdbId}" data-type="${e.type}" data-ts="${e.timestamp || ''}">Edit</button>
+              <button class="tl-btn tl-btn-del" data-tmdb="${e.tmdbId}" data-ts="${e.timestamp || ''}">Remove</button>
+            </div>
           </div>`;
       });
 
@@ -311,15 +314,16 @@ const DiaryUI = {
     // Bind clicks
     container.querySelectorAll('.tl-entry').forEach(el => {
       el.addEventListener('click', (ev) => {
-        if (ev.target.closest('.tl-entry-delete')) return;
-        const id = parseInt(el.dataset.tmdb);
-        const type = el.dataset.type;
-        if (type === 'movie') MoviesUI.openDetail(id);
-        else TvShowsUI.openDetail(id);
+        if (ev.target.closest('.tl-btn-del') || ev.target.closest('.tl-btn-edit')) return;
+        DetailUI.open(parseInt(el.dataset.tmdb), el.dataset.type);
       });
     });
 
-    container.querySelectorAll('.tl-entry-delete').forEach(btn => {
+    container.querySelectorAll('.tl-btn-edit').forEach(btn => {
+      btn.addEventListener('click', (ev) => { ev.stopPropagation(); this._editEntryModal(btn.dataset.ts); });
+    });
+
+    container.querySelectorAll('.tl-btn-del').forEach(btn => {
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation();
         const tmdbId = parseInt(btn.dataset.tmdb);
@@ -462,6 +466,10 @@ const DiaryUI = {
                   </div>
                   ${e.notes ? `<div class="diary-day-item-notes">${esc(e.notes)}</div>` : ''}
                 </div>
+                <div class="diary-day-item-actions">
+                  ${e.timestamp ? `<button class="ddi-btn ddi-edit" data-ts="${e.timestamp}">Edit</button>` : ''}
+                  ${e.timestamp ? `<button class="ddi-btn ddi-del" data-tmdb="${e.tmdbId}" data-ts="${e.timestamp}">Remove</button>` : ''}
+                </div>
               </div>`;
           }).join('')}
         </div>
@@ -469,11 +477,21 @@ const DiaryUI = {
     `;
 
     detail.querySelectorAll('.diary-day-item').forEach(el => {
-      el.addEventListener('click', () => {
-        const id = parseInt(el.dataset.tmdb);
-        const type = el.dataset.type;
-        if (type === 'movie') MoviesUI.openDetail(id);
-        else TvShowsUI.openDetail(id);
+      el.addEventListener('click', (ev) => {
+        if (ev.target.closest('.ddi-edit') || ev.target.closest('.ddi-del')) return;
+        DetailUI.open(parseInt(el.dataset.tmdb), el.dataset.type);
+      });
+    });
+    detail.querySelectorAll('.ddi-edit').forEach(btn => {
+      btn.addEventListener('click', (ev) => { ev.stopPropagation(); this._editEntryModal(btn.dataset.ts); });
+    });
+    detail.querySelectorAll('.ddi-del').forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (confirm('Remove this entry?')) {
+          Store.removeDiaryEntry(parseInt(btn.dataset.tmdb), btn.dataset.ts);
+          this._renderStatsBar(); this._renderCurrentView(); toast('Removed');
+        }
       });
     });
   },
@@ -658,6 +676,10 @@ const DiaryUI = {
                   </div>
                   ${e.notes ? `<div class="diary-day-item-notes">${esc(e.notes)}</div>` : ''}
                 </div>
+                <div class="diary-day-item-actions">
+                  ${e.timestamp ? `<button class="diary-day-edit-btn" data-ts="${e.timestamp}">Edit</button>` : ''}
+                  ${e.timestamp ? `<button class="diary-day-del-btn" data-tmdb="${e.tmdbId}" data-ts="${e.timestamp}">Remove</button>` : ''}
+                </div>
               </div>`;
           }).join('')}
         </div>
@@ -665,11 +687,21 @@ const DiaryUI = {
     `;
 
     detail.querySelectorAll('.diary-day-item').forEach(el => {
-      el.addEventListener('click', () => {
-        const id = parseInt(el.dataset.tmdb);
-        const type = el.dataset.type;
-        if (type === 'movie') MoviesUI.openDetail(id);
-        else TvShowsUI.openDetail(id);
+      el.addEventListener('click', (ev) => {
+        if (ev.target.closest('.diary-day-edit-btn') || ev.target.closest('.diary-day-del-btn')) return;
+        DetailUI.open(parseInt(el.dataset.tmdb), el.dataset.type);
+      });
+    });
+    detail.querySelectorAll('.diary-day-edit-btn').forEach(btn => {
+      btn.addEventListener('click', (ev) => { ev.stopPropagation(); this._editEntryModal(btn.dataset.ts); });
+    });
+    detail.querySelectorAll('.diary-day-del-btn').forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (confirm('Remove this entry?')) {
+          Store.removeDiaryEntry(parseInt(btn.dataset.tmdb), btn.dataset.ts);
+          this._renderStatsBar(); this._renderCurrentView(); toast('Removed');
+        }
       });
     });
   },
@@ -717,28 +749,19 @@ const DiaryUI = {
             </div>
 
             <div class="edit-field">
-              <div class="edit-field-label">What did you do?</div>
+              <div class="edit-field-label">Action</div>
               <select class="status-select edit-full-select" id="diaryEntryAction">
                 <option value="watched">Watched</option>
-                <option value="completed">Completed</option>
-                <option value="watched_episodes">Watched episodes</option>
-                <option value="started">Started</option>
                 <option value="rewatch">Rewatched</option>
-                <option value="session">General session</option>
               </select>
             </div>
 
-            <div class="edit-field" id="diaryEpisodesField" style="display:none;">
-              <div class="edit-field-label">Episodes (e.g. "S2E1–E4")</div>
-              <input type="text" class="edit-date-input" id="diaryEntryEpisodes" placeholder="S1E1–E3" style="width:100%;">
-            </div>
-
             <div class="edit-field">
-              <div class="edit-field-label">Rating (1–10)</div>
-              <div class="diary-rating-row" id="diaryRatingRow">
-                ${[1,2,3,4,5,6,7,8,9,10].map(n => `<button class="diary-rating-btn" data-val="${n}">${n}</button>`).join('')}
-                <button class="diary-rating-btn diary-rating-clear" data-val="0">✕</button>
-              </div>
+              <div class="edit-field-label">Rating</div>
+              <select class="status-select edit-full-select" id="diaryEntryRating">
+                <option value="0">— No rating —</option>
+                ${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}">★ ${n}/10</option>`).join('')}
+              </select>
             </div>
 
             <div class="edit-field">
@@ -779,21 +802,6 @@ const DiaryUI = {
       modal.querySelector('#diaryEntryDate').value = today;
     });
 
-    // Show/hide episodes field
-    modal.querySelector('#diaryEntryAction').addEventListener('change', (e) => {
-      modal.querySelector('#diaryEpisodesField').style.display = e.target.value === 'watched_episodes' ? 'block' : 'none';
-    });
-
-    // Rating selection
-    let selectedRating = 0;
-    modal.querySelectorAll('.diary-rating-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        selectedRating = parseInt(btn.dataset.val);
-        modal.querySelectorAll('.diary-rating-btn').forEach(b => b.classList.remove('active'));
-        if (selectedRating > 0) btn.classList.add('active');
-      });
-    });
-
     // Mood selection
     let selectedMood = '';
     modal.querySelectorAll('.diary-mood-btn').forEach(btn => {
@@ -823,7 +831,6 @@ const DiaryUI = {
       if (!date) { toast('Please select a date'); return; }
 
       const action = modal.querySelector('#diaryEntryAction').value;
-      const episodes = modal.querySelector('#diaryEntryEpisodes')?.value || '';
       const notes = modal.querySelector('#diaryEntryNotes').value.trim();
 
       const entry = {
@@ -834,9 +841,9 @@ const DiaryUI = {
         date: date,
         action: action,
         notes: notes,
-        rating: selectedRating || null,
+        rating: parseInt(modal.querySelector('#diaryEntryRating').value) || null,
         mood: selectedMood || null,
-        episodes: episodes || null,
+        episodes: null,
         timestamp: new Date().toISOString(),
       };
 
@@ -851,6 +858,51 @@ const DiaryUI = {
       toast('Diary entry saved!');
       closeModal();
       this.render();
+    });
+  },
+
+  _editEntryModal(timestamp) {
+    const entry = Store.getDiaryEntry(timestamp);
+    if (!entry) return;
+    const isM = entry.type === 'movie';
+    const html = `<div class="modal-backdrop edit-modal-backdrop" id="diaryEditModal">
+      <div class="modal-box edit-modal-box" style="max-width:420px;">
+        <div class="modal-header"><h2>Edit Diary Entry</h2><button class="modal-close-btn" id="deClose">&#10005;</button></div>
+        <div class="modal-body">
+          <div class="edit-field"><div class="edit-field-label">Date</div><input type="date" id="deDate" value="${entry.date || ''}" class="edit-date-input" style="width:100%;"></div>
+          <div class="edit-dates-row">
+            <div class="edit-field edit-field-half"><div class="edit-field-label">Action</div>
+              <select id="deAction" class="edit-select" style="width:100%;">
+                <option value="watched" ${entry.action === 'watched' ? 'selected' : ''}>Watched</option>
+                <option value="rewatch" ${entry.action === 'rewatch' ? 'selected' : ''}>Rewatched</option>
+              </select>
+            </div>
+            <div class="edit-field edit-field-half"><div class="edit-field-label">Rating</div>
+              <select id="deRating" class="edit-select" style="width:100%;">
+                <option value="0">— None —</option>
+                ${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}" ${entry.rating === n ? 'selected' : ''}>★ ${n}/10</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="edit-field"><div class="edit-field-label">Notes</div><textarea class="diary-notes-input" id="deNotes" rows="3">${esc(entry.notes || '')}</textarea></div>
+          <div class="edit-actions"><button class="btn-accent" id="deSave">Save</button><button class="btn-ghost" id="deCancel">Cancel</button></div>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    const m = document.getElementById('diaryEditModal');
+    const close = () => { m.remove(); this._renderStatsBar(); this._renderCurrentView(); };
+    m.querySelector('#deClose').addEventListener('click', close);
+    m.querySelector('#deCancel').addEventListener('click', close);
+    m.addEventListener('click', e => { if (e.target === m) close(); });
+    m.querySelector('#deSave').addEventListener('click', () => {
+      Store.updateDiaryEntry(timestamp, {
+        date: m.querySelector('#deDate').value,
+        action: m.querySelector('#deAction').value,
+        rating: parseInt(m.querySelector('#deRating').value) || null,
+        notes: m.querySelector('#deNotes').value.trim(),
+      });
+      toast('Updated'); close();
     });
   },
 };

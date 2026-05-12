@@ -53,7 +53,7 @@ const DetailUI = {
     if (d.vote_average) stats += `<div class="detail-stat"><div class="detail-stat-val gold">${d.vote_average.toFixed(1)}</div><div class="detail-stat-label">TMDB (${d.vote_count||0})</div></div>`;
     if (inList) {
       if (isM) { const ur = Store.getUserRating(tmdbId,'movie'); if (ur) stats += `<div class="detail-stat"><div class="detail-stat-val" style="color:var(--accent-light)">★ ${ur}</div><div class="detail-stat-label">Your Rating</div></div>`; }
-      else { const avgR = Store.getAvgUserRating(tmdbId,'tv'); if (avgR) stats += `<div class="detail-stat"><div class="detail-stat-val" style="color:var(--accent-light)">★ ${avgR.toFixed(1)}</div><div class="detail-stat-label">Your Avg</div></div>`; }
+      else { const ar = Store.getAvgUserRating(tmdbId,'tv'); if (ar) stats += `<div class="detail-stat"><div class="detail-stat-val" style="color:var(--accent-light)">★ ${ar.toFixed(1)}</div><div class="detail-stat-label">Your Avg</div></div>`; }
     }
     if (d.popularity) stats += `<div class="detail-stat"><div class="detail-stat-val">${Math.round(d.popularity)}</div><div class="detail-stat-label">Popularity</div></div>`;
     if (!isM && d.status) stats += `<div class="detail-stat"><div class="detail-stat-val">${d.status}</div><div class="detail-stat-label">Status</div></div>`;
@@ -78,7 +78,7 @@ const DetailUI = {
         <div class="custom-dd-menu hidden" id="detailStatusMenu">
           ${statusEntries.map(e => `<div class="dd-item ${e.val===ws?'active':''}" data-val="${e.val}"><span class="dd-dot" style="background:${e.color}"></span>${e.label}</div>`).join('')}
         </div>
-      </div><button class="btn-accent" id="detailEditBtn">Edit</button><button class="btn-ghost" id="detailDiaryBtn">&#9998; Log Diary</button>`;
+      </div><button class="btn-accent" id="detailEditBtn">Edit</button><button class="btn-accent btn-diary-log" id="detailDiaryBtn">Log Diary</button>`;
     } else { actions = `<button class="btn-accent" id="detailAddBtn">+ Add to List</button>`; }
 
     const dates = inList && (sd||ed) ? `<div class="detail-dates-row">${sd?`<span class="detail-date-chip">Started: ${sd}</span>`:''}${ed?`<span class="detail-date-chip">Finished: ${ed}</span>`:''}</div>` : '';
@@ -102,7 +102,7 @@ const DetailUI = {
             <button class="ep-dec" data-snum="${s.season_number}">-</button>
             <div class="ep-counter-val">${w} / ${tot}</div>
             <button class="ep-inc" data-snum="${s.season_number}">+</button>
-          </div><div class="season-btn-stack"><button class="season-done-btn ${done?'undone':'mark-done'}" data-snum="${s.season_number}">${done?'Undo':'Done'}</button><button class="season-diary-btn" data-snum="${s.season_number}" data-stitle="Season ${s.season_number}" title="Log to diary">&#9998;</button></div></div>
+          </div><div class="season-btn-col"><button class="season-done-btn ${done?'undone':'mark-done'}" data-snum="${s.season_number}">${done?'Undo':'Done'}</button><button class="season-diary-btn" data-snum="${s.season_number}" title="Log to diary">Log</button></div></div>
         </div>`;
       }).join('')}</div></div>`;
     }
@@ -143,7 +143,7 @@ const DetailUI = {
         ${cast.length?`<div class="detail-section"><h3>Cast</h3><div class="cast-row">${cast.map(c=>{const p=TMDB.profile(c.profile_path);return`<div class="cast-card">${p?`<img src="${p}" loading="lazy">`:'<div class="cast-ph"></div>'}<div class="cast-name">${esc(c.name)}</div><div class="cast-char">${esc(c.character||'')}</div></div>`;}).join('')}</div></div>`:''}
         ${!isM&&networks.length?`<div class="detail-section"><h3>Networks</h3><div class="companies-row">${networks.map(n=>`<div class="company-tag">${n.logo_path?`<img src="${TMDB.poster(n.logo_path,'w92')}">`:''}${esc(n.name)}</div>`).join('')}</div></div>`:''}
         ${companies.length?`<div class="detail-section"><h3>Production</h3><div class="companies-row">${companies.map(c=>`<div class="company-tag">${c.logo_path?`<img src="${TMDB.poster(c.logo_path,'w92')}">`:''}${esc(c.name)}</div>`).join('')}</div></div>`:''}
-        ${trailer?`<div class="detail-section"><h3>Trailer</h3><div style="border-radius:12px;overflow:hidden;max-width:640px;"><iframe width="100%" height="360" src="https://www.youtube.com/embed/${trailer.key}" frameborder="0" allowfullscreen style="display:block;"></iframe></div></div>`:''}
+        ${trailer?`<div class="detail-section"><h3>Trailer</h3><div style="border-radius:12px;overflow:hidden;max-width:640px;"><iframe width="100%" height="360" src="https://www.youtube-nocookie.com/embed/${trailer.key}?rel=0&modestbranding=1&origin=null" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="display:block;"></iframe></div></div>`:''}
         ${recs.length?`<div class="detail-section"><h3>Recommended</h3><div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;">${recs.map(r=>{const rP=TMDB.poster(r.poster_path,'w185');const rT=r.media_type||(r.first_air_date?'tv':'movie');return`<div class="grid-card" data-tmdb="${r.id}" data-type="${rT}" style="flex-shrink:0;width:130px;"><div class="poster-wrap" style="aspect-ratio:2/3;">${rP?`<img src="${rP}" loading="lazy">`:`<div class="no-poster-ph">${ph}</div>`}<div class="poster-overlay"></div></div><div class="grid-card-info"><div class="grid-card-title">${esc(r.title||r.name)}</div></div></div>`;}).join('')}</div></div>`:''}
       </div>`;
 
@@ -189,19 +189,12 @@ const DetailUI = {
 
     const eBtn = page.querySelector('#detailEditBtn');
     if (eBtn) eBtn.addEventListener('click', () => this._editModal(tmdbId, mediaType, title, d));
-
     const dBtn = page.querySelector('#detailDiaryBtn');
     if (dBtn) dBtn.addEventListener('click', () => this._diaryLogModal(tmdbId, mediaType, title, stored?.posterPath, null));
-
     if (!isM && inList) {
       this._bindSeason(page, tmdbId, tmdbS);
-      // Season diary icons
       page.querySelectorAll('.season-diary-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const sn = parseInt(btn.dataset.snum);
-          this._diaryLogModal(tmdbId, 'tv', title, stored?.posterPath, sn);
-        });
+        btn.addEventListener('click', e => { e.stopPropagation(); this._diaryLogModal(tmdbId,'tv',title,stored?.posterPath,parseInt(btn.dataset.snum)); });
       });
     }
 
@@ -216,38 +209,13 @@ const DetailUI = {
     const rwH = st.rewatchHistory || [];
     const rwHtml = rwH.length ? `<div class="edit-rewatch-history"><div class="edit-field-label">Rewatch History</div>${rwH.map((rw,i)=>`<div class="rw-history-row"><span class="rw-history-num">#${i+1}</span><span class="rw-history-dates">${rw.startDate||'—'} → ${rw.endDate||'—'}</span></div>`).join('')}</div>` : '';
 
-    // Diary entries for this title
-    const diaryEntries = Store.getDiary().filter(d => d.tmdbId === tmdbId && d.type === mt);
-    const actionLabels = { completed:'Completed', rewatch:'Rewatched', watched:'Watched', watched_episodes:'Watched eps', started:'Started', session:'Session' };
-    const diaryHtml = diaryEntries.length ? `<div class="edit-field"><div class="edit-field-label">Diary Entries (${diaryEntries.length})</div>
-      <div class="edit-diary-list">${diaryEntries.map(de => {
-        const act = actionLabels[de.action] || de.action || 'Logged';
-        const rStr = de.rating ? ` · ★ ${de.rating}` : '';
-        const sStr = de.season ? ` · S${de.season}` : '';
-        return `<div class="edit-diary-row">
-          <div class="edit-diary-info"><span class="edit-diary-date">${de.date||'—'}</span><span class="edit-diary-act">${act}${sStr}${rStr}</span>${de.notes?`<span class="edit-diary-notes">${esc(de.notes).substring(0,60)}</span>`:''}</div>
-          <button class="edit-diary-edit-btn" data-ts="${de.timestamp}">Edit</button>
-          <button class="edit-diary-del-btn" data-ts="${de.timestamp}">&#10005;</button>
-        </div>`;
-      }).join('')}</div></div>` : '';
-
     const html = `<div class="modal-backdrop edit-modal-backdrop" id="editModal"><div class="modal-box edit-modal-box"><div class="modal-header"><h2>Edit — ${esc(st.title)}</h2><button class="modal-close-btn" id="editClose">&#10005;</button></div><div class="modal-body">
-      <div class="edit-dates-row">
-        <div class="edit-field edit-field-half"><div class="edit-field-label">Start Date</div><div class="edit-date-input-row"><input type="date" id="editStart" value="${st.startDate||''}" class="edit-date-input"><button class="btn-today" id="editStartT">Today</button></div></div>
-        <div class="edit-field edit-field-half"><div class="edit-field-label">End Date</div><div class="edit-date-input-row"><input type="date" id="editEnd" value="${st.endDate||''}" class="edit-date-input"><button class="btn-today" id="editEndT">Today</button></div></div>
-      </div>
-      <hr>
-      <div class="edit-field"><div class="edit-field-label">Rewatches</div>
-        <div class="edit-rewatch-controls"><div class="ep-counter"><button id="rwDec">-</button><div class="ep-counter-val" id="rwVal">${st.rewatchCount||0}</div><button id="rwInc">+</button></div>
-        <button class="btn-ghost" id="editLogRw">Log New Rewatch</button></div>
-        <p class="edit-field-hint">Use +/- to adjust count. "Log New Rewatch" saves dates and resets${!isM?' season progress':''}.</p>
-      </div>
-      ${rwHtml}
-      ${diaryHtml}
-      <hr>
-      <div class="edit-actions"><button class="btn-accent" id="editSave">Save Changes</button><button class="btn-ghost" id="editCancel">Cancel</button></div>
-      <hr>
-      <div class="edit-field" style="padding-top:4px;"><button class="btn-delete" id="editDelete">Delete Permanently</button><p class="edit-field-hint" style="margin-top:4px;">Removes entry and all related data.</p></div>
+      <div class="edit-dates-row"><div class="edit-field edit-field-half"><div class="edit-field-label">Start Date</div><div class="edit-date-input-row"><input type="date" id="editStart" value="${st.startDate||''}" class="edit-date-input"><button class="btn-today" id="editStartT">Today</button></div></div>
+      <div class="edit-field edit-field-half"><div class="edit-field-label">End Date</div><div class="edit-date-input-row"><input type="date" id="editEnd" value="${st.endDate||''}" class="edit-date-input"><button class="btn-today" id="editEndT">Today</button></div></div></div>
+      <hr><div class="edit-field"><div class="edit-field-label">Rewatches</div><div class="edit-rewatch-row"><div class="ep-counter"><button id="rwDec">-</button><div class="ep-counter-val" id="rwVal">${st.rewatchCount||0}</div><button id="rwInc">+</button></div>
+      <button class="btn-ghost" id="editLogRw" style="margin-left:12px;">Log New Rewatch</button></div><p class="edit-field-hint" style="margin-top:6px;">Use +/- to adjust count. "Log New Rewatch" saves dates and resets${!isM?' season progress':''}.</p></div>${rwHtml}
+      <hr><div class="edit-actions"><button class="btn-accent" id="editSave">Save Changes</button><button class="btn-ghost" id="editCancel">Cancel</button></div>
+      <hr><div class="edit-field" style="padding-top:4px;"><button class="btn-delete" id="editDelete">Delete Permanently</button><p class="edit-field-hint" style="margin-top:4px;">Removes entry and all related data.</p></div>
     </div></div></div>`;
 
     document.body.insertAdjacentHTML('beforeend', html);
@@ -262,16 +230,6 @@ const DetailUI = {
     m.querySelector('#editEndT').addEventListener('click', () => { m.querySelector('#editEnd').value = today; });
     m.querySelector('#rwInc').addEventListener('click', () => { rwc++; m.querySelector('#rwVal').textContent = rwc; });
     m.querySelector('#rwDec').addEventListener('click', () => { if (rwc > 0) rwc--; m.querySelector('#rwVal').textContent = rwc; });
-
-    // Edit diary entries
-    m.querySelectorAll('.edit-diary-edit-btn').forEach(btn => {
-      btn.addEventListener('click', () => { close(); this._editDiaryEntryModal(btn.dataset.ts, tmdbId, mt, title, details); });
-    });
-    m.querySelectorAll('.edit-diary-del-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (confirm('Remove this diary entry?')) { Store.removeDiaryEntry(tmdbId, btn.dataset.ts); toast('Removed'); close(); this._editModal(tmdbId, mt, title, details); }
-      });
-    });
 
     m.querySelector('#editLogRw').addEventListener('click', () => {
       const cs = m.querySelector('#editStart').value||st.startDate||'', ce = m.querySelector('#editEnd').value||st.endDate||'';
@@ -297,115 +255,45 @@ const DetailUI = {
     });
   },
 
-  // ─── Diary Log Modal (separate from edit) ───
   _diaryLogModal(tmdbId, mediaType, title, posterPath, season) {
-    const today = new Date().toISOString().substring(0, 10);
-    const poster = TMDB.poster(posterPath, 'w185');
-    const isM = mediaType === 'movie';
-    const st = isM ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
-    const seasonOpts = !isM && st ? (st.seasons||[]).map(s => `<option value="${s.seasonNumber}" ${season===s.seasonNumber?'selected':''}>Season ${s.seasonNumber}</option>`).join('') : '';
-
-    const html = `<div class="modal-backdrop edit-modal-backdrop" id="diaryLogModal"><div class="modal-box edit-modal-box" style="max-width:460px;"><div class="modal-header"><h2>Log to Diary</h2><button class="modal-close-btn" id="dlClose">&#10005;</button></div><div class="modal-body">
-      <div class="dp-hero">
-        <div class="dp-poster">${poster?`<img src="${poster}">`:`<div class="no-poster-ph" style="width:72px;height:108px;border-radius:6px;">${isM?'MOV':'TV'}</div>`}</div>
-        <div class="dp-info"><div class="dp-title">${esc(title)}</div>${season?`<div class="dp-season-tag">Season ${season}</div>`:''}</div>
-      </div>
+    const today=new Date().toISOString().substring(0,10); const poster=TMDB.poster(posterPath,'w185'); const isM=mediaType==='movie';
+    const st=isM?Store.getMovie(tmdbId):Store.getTvShow(tmdbId);
+    const sOpts=!isM&&st?(st.seasons||[]).map(s=>`<option value="${s.seasonNumber}" ${season===s.seasonNumber?'selected':''}>Season ${s.seasonNumber}</option>`).join(''):'';
+    const entries=Store.getDiary().filter(d=>d.tmdbId===tmdbId&&d.type===mediaType);
+    const aL={completed:'Completed',rewatch:'Rewatched',watched:'Watched',watched_episodes:'Watched eps',started:'Started',session:'Session'};
+    const histHtml=entries.length?`<div class="dl-hist-section"><div class="dl-hist-header">Diary History (${entries.length})</div><div class="dl-hist-list">${entries.map(de=>{const a=aL[de.action]||de.action;const r=de.rating?` · ★ ${de.rating}`:'';const s=de.season?` · S${de.season}`:'';return`<div class="dl-hist-row"><div class="dl-hist-info"><span class="dl-hist-date">${de.date||'—'}</span><span class="dl-hist-act">${a}${s}${r}</span></div><button class="dl-hist-edit" data-ts="${de.timestamp}">Edit</button><button class="dl-hist-del" data-ts="${de.timestamp}">Remove</button></div>`;}).join('')}</div></div>`:'';
+    const html=`<div class="modal-backdrop edit-modal-backdrop" id="diaryLogModal"><div class="modal-box edit-modal-box" style="max-width:460px;"><div class="modal-header"><h2>Log Diary</h2><button class="modal-close-btn" id="dlClose">&#10005;</button></div><div class="modal-body">
+      <div class="dp-hero"><div class="dp-poster">${poster?`<img src="${poster}">`:`<div class="no-poster-ph" style="width:72px;height:108px;border-radius:6px;">${isM?'MOV':'TV'}</div>`}</div><div class="dp-info"><div class="dp-title">${esc(title)}</div>${season?`<div class="dp-season-tag">Season ${season}</div>`:''}</div></div>
       <div class="edit-field"><div class="edit-field-label">Date</div><div class="edit-date-input-row"><input type="date" id="dlDate" value="${today}" class="edit-date-input" style="flex:1;"><button class="btn-today" id="dlToday">Today</button></div></div>
-      <div class="edit-field"><div class="edit-field-label">Action</div>
-        <select id="dlAction" class="edit-select" style="width:100%;">
-          <option value="watched">Watched</option><option value="completed">Completed</option>
-          ${!isM?'<option value="watched_episodes">Watched episodes</option>':''}
-          <option value="rewatch">Rewatched</option><option value="session">Session</option>
-        </select>
-      </div>
-      ${!isM && !season?`<div class="edit-field"><div class="edit-field-label">Season (optional)</div><select id="dlSeason" class="edit-select" style="width:100%;"><option value="">General / All</option>${seasonOpts}</select></div>`:''}
-      <div class="edit-field"><div class="edit-field-label">Rating (1–10)</div>
-        <div class="diary-rating-row" id="dlRating">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<button class="diary-rating-btn" data-val="${n}">${n}</button>`).join('')}<button class="diary-rating-btn diary-rating-clear" data-val="0">&#10005;</button></div>
-      </div>
-      <div class="edit-field"><div class="edit-field-label">Notes</div><textarea class="diary-notes-input" id="dlNotes" rows="2" placeholder="Thoughts, reactions..."></textarea></div>
+      <div class="edit-dates-row"><div class="edit-field edit-field-half"><div class="edit-field-label">Action</div><select id="dlAction" class="edit-select" style="width:100%;"><option value="watched">Watched</option><option value="rewatch">Rewatched</option></select></div><div class="edit-field edit-field-half"><div class="edit-field-label">Rating</div><select id="dlRating" class="edit-select" style="width:100%;"><option value="0">— None —</option>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}">★ ${n}/10</option>`).join('')}</select></div></div>
+      ${!isM&&!season?`<div class="edit-field"><div class="edit-field-label">Season</div><select id="dlSeason" class="edit-select" style="width:100%;"><option value="">General / All</option>${sOpts}</select></div>`:''}
+      <div class="edit-field"><div class="edit-field-label">Notes</div><textarea class="diary-notes-input" id="dlNotes" rows="2" placeholder="Thoughts..."></textarea></div>
       <div class="edit-actions"><button class="btn-accent" id="dlSave" style="flex:1;">Save Entry</button><button class="btn-ghost" id="dlCancel">Cancel</button></div>
+      ${histHtml}
     </div></div></div>`;
-
-    document.body.insertAdjacentHTML('beforeend', html);
-    const m = document.getElementById('diaryLogModal');
-    const close = () => m.remove();
-    m.querySelector('#dlClose').addEventListener('click', close);
-    m.querySelector('#dlCancel').addEventListener('click', close);
-    m.addEventListener('click', e => { if (e.target === m) close(); });
-    m.querySelector('#dlToday').addEventListener('click', () => { m.querySelector('#dlDate').value = today; });
-
-    let rating = 0;
-    m.querySelectorAll('#dlRating .diary-rating-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        rating = parseInt(btn.dataset.val);
-        m.querySelectorAll('#dlRating .diary-rating-btn').forEach(b => b.classList.remove('active'));
-        if (rating > 0) btn.classList.add('active');
-      });
-    });
-
-    m.querySelector('#dlSave').addEventListener('click', () => {
-      const date = m.querySelector('#dlDate').value;
-      if (!date) { toast('Pick a date'); return; }
-      const action = m.querySelector('#dlAction').value;
-      const notes = m.querySelector('#dlNotes').value.trim();
-      const selSeason = season || (!isM && m.querySelector('#dlSeason') ? parseInt(m.querySelector('#dlSeason').value) || null : null);
-      Store.addDiaryEntry({ tmdbId, title, type: mediaType, posterPath, date, action, notes, rating: rating||null, mood: null, episodes: null, season: selSeason, timestamp: new Date().toISOString() });
-      Store.addActivity({ tmdbId, title, type: mediaType, posterPath, action: 'diary', detail: `Logged: ${action}${selSeason?' S'+selSeason:''}`, timestamp: new Date().toISOString() });
-      toast('Diary entry saved!'); close();
-    });
+    document.body.insertAdjacentHTML('beforeend',html);const m=document.getElementById('diaryLogModal');const close=()=>m.remove();
+    m.querySelector('#dlClose').addEventListener('click',close);m.querySelector('#dlCancel').addEventListener('click',close);m.addEventListener('click',e=>{if(e.target===m)close();});
+    m.querySelector('#dlToday').addEventListener('click',()=>{m.querySelector('#dlDate').value=today;});
+    m.querySelectorAll('.dl-hist-edit').forEach(btn=>{btn.addEventListener('click',()=>{close();this._editDiaryEntry(btn.dataset.ts,tmdbId,mediaType,title,posterPath);});});
+    m.querySelectorAll('.dl-hist-del').forEach(btn=>{btn.addEventListener('click',()=>{if(confirm('Remove?')){Store.removeDiaryEntry(tmdbId,btn.dataset.ts);toast('Removed');close();this._diaryLogModal(tmdbId,mediaType,title,posterPath,season);}});});
+    m.querySelector('#dlSave').addEventListener('click',()=>{const date=m.querySelector('#dlDate').value;if(!date){toast('Pick a date');return;}const action=m.querySelector('#dlAction').value;const notes=m.querySelector('#dlNotes').value.trim();const rating=parseInt(m.querySelector('#dlRating').value)||null;const selS=season||(!isM&&m.querySelector('#dlSeason')?parseInt(m.querySelector('#dlSeason').value)||null:null);Store.addDiaryEntry({tmdbId,title,type:mediaType,posterPath,date,action,notes,rating,mood:null,episodes:null,season:selS,timestamp:new Date().toISOString()});toast('Saved!');close();this.open(tmdbId,mediaType);});
   },
 
-  // ─── Edit existing diary entry ───
-  _editDiaryEntryModal(timestamp, tmdbId, mt, title, details) {
-    const entry = Store.getDiaryEntry(timestamp);
-    if (!entry) return;
-    const isM = mt === 'movie';
-    const st = isM ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
-    const seasonOpts = !isM && st ? (st.seasons||[]).map(s => `<option value="${s.seasonNumber}" ${entry.season===s.seasonNumber?'selected':''}>Season ${s.seasonNumber}</option>`).join('') : '';
-
-    const html = `<div class="modal-backdrop edit-modal-backdrop" id="editDiaryModal"><div class="modal-box edit-modal-box" style="max-width:420px;"><div class="modal-header"><h2>Edit Diary Entry</h2><button class="modal-close-btn" id="edClose">&#10005;</button></div><div class="modal-body">
+  _editDiaryEntry(ts, tmdbId, mt, title, posterPath) {
+    const entry=Store.getDiaryEntry(ts);if(!entry)return;const isM=mt==='movie';const st=isM?Store.getMovie(tmdbId):Store.getTvShow(tmdbId);
+    const sOpts=!isM&&st?(st.seasons||[]).map(s=>`<option value="${s.seasonNumber}" ${entry.season===s.seasonNumber?'selected':''}>Season ${s.seasonNumber}</option>`).join(''):'';
+    const html=`<div class="modal-backdrop edit-modal-backdrop" id="editDiaryModal"><div class="modal-box edit-modal-box" style="max-width:420px;"><div class="modal-header"><h2>Edit Entry</h2><button class="modal-close-btn" id="edClose">&#10005;</button></div><div class="modal-body">
       <div class="edit-field"><div class="edit-field-label">Date</div><input type="date" id="edDate" value="${entry.date||''}" class="edit-date-input" style="width:100%;"></div>
-      <div class="edit-field"><div class="edit-field-label">Action</div>
-        <select id="edAction" class="edit-select" style="width:100%;">
-          <option value="watched" ${entry.action==='watched'?'selected':''}>Watched</option>
-          <option value="completed" ${entry.action==='completed'?'selected':''}>Completed</option>
-          ${!isM?`<option value="watched_episodes" ${entry.action==='watched_episodes'?'selected':''}>Watched eps</option>`:''}
-          <option value="rewatch" ${entry.action==='rewatch'?'selected':''}>Rewatched</option>
-          <option value="session" ${entry.action==='session'?'selected':''}>Session</option>
-        </select>
-      </div>
-      ${!isM?`<div class="edit-field"><div class="edit-field-label">Season</div><select id="edSeason" class="edit-select" style="width:100%;"><option value="">General</option>${seasonOpts}</select></div>`:''}
-      <div class="edit-field"><div class="edit-field-label">Rating</div>
-        <div class="diary-rating-row" id="edRating">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<button class="diary-rating-btn ${entry.rating===n?'active':''}" data-val="${n}">${n}</button>`).join('')}<button class="diary-rating-btn diary-rating-clear" data-val="0">&#10005;</button></div>
-      </div>
+      <div class="edit-dates-row"><div class="edit-field edit-field-half"><div class="edit-field-label">Action</div><select id="edAction" class="edit-select" style="width:100%;"><option value="watched" ${entry.action==='watched'?'selected':''}>Watched</option><option value="rewatch" ${entry.action==='rewatch'?'selected':''}>Rewatched</option></select></div>
+      <div class="edit-field edit-field-half"><div class="edit-field-label">Rating</div><select id="edRating" class="edit-select" style="width:100%;"><option value="0">— None —</option>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${entry.rating===n?'selected':''}>★ ${n}/10</option>`).join('')}</select></div></div>
+      ${!isM?`<div class="edit-field"><div class="edit-field-label">Season</div><select id="edSeason" class="edit-select" style="width:100%;"><option value="">General</option>${sOpts}</select></div>`:''}
       <div class="edit-field"><div class="edit-field-label">Notes</div><textarea class="diary-notes-input" id="edNotes" rows="3">${esc(entry.notes||'')}</textarea></div>
-      <div class="edit-actions"><button class="btn-accent" id="edSave">Save</button><button class="btn-ghost" id="edCancel">Back</button></div>
+      <div class="edit-actions"><button class="btn-accent" id="edSave">Save</button><button class="btn-ghost" id="edBack">Back</button></div>
     </div></div></div>`;
-
-    document.body.insertAdjacentHTML('beforeend', html);
-    const m = document.getElementById('editDiaryModal');
-    const close = () => m.remove();
-    m.querySelector('#edClose').addEventListener('click', close);
-    m.querySelector('#edCancel').addEventListener('click', () => { close(); this._editModal(tmdbId, mt, title, details); });
-    m.addEventListener('click', e => { if (e.target === m) { close(); this._editModal(tmdbId, mt, title, details); } });
-
-    let rating = entry.rating || 0;
-    m.querySelectorAll('#edRating .diary-rating-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        rating = parseInt(btn.dataset.val);
-        m.querySelectorAll('#edRating .diary-rating-btn').forEach(b => b.classList.remove('active'));
-        if (rating > 0) btn.classList.add('active');
-      });
-    });
-
-    m.querySelector('#edSave').addEventListener('click', () => {
-      Store.updateDiaryEntry(timestamp, {
-        date: m.querySelector('#edDate').value, action: m.querySelector('#edAction').value,
-        season: !isM && m.querySelector('#edSeason') ? parseInt(m.querySelector('#edSeason').value)||null : null,
-        rating: rating||null, notes: m.querySelector('#edNotes').value.trim(),
-      });
-      toast('Updated'); close(); this._editModal(tmdbId, mt, title, details);
-    });
+    document.body.insertAdjacentHTML('beforeend',html);const m=document.getElementById('editDiaryModal');const close=()=>m.remove();
+    m.querySelector('#edClose').addEventListener('click',close);m.querySelector('#edBack').addEventListener('click',()=>{close();this._diaryLogModal(tmdbId,mt,title,posterPath,null);});
+    m.addEventListener('click',e=>{if(e.target===m)close();});
+    m.querySelector('#edSave').addEventListener('click',()=>{Store.updateDiaryEntry(ts,{date:m.querySelector('#edDate').value,action:m.querySelector('#edAction').value,season:!isM&&m.querySelector('#edSeason')?parseInt(m.querySelector('#edSeason').value)||null:null,rating:parseInt(m.querySelector('#edRating').value)||null,notes:m.querySelector('#edNotes').value.trim()});toast('Updated');close();this._diaryLogModal(tmdbId,mt,title,posterPath,null);});
   },
 
   _bindSeason(page, tmdbId, tmdbS) {
