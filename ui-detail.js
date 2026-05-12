@@ -6,25 +6,70 @@ const DetailUI = {
     page.innerHTML = '<div style="padding:40px;color:var(--text-3)">Loading...</div>';
     App.showPage('detail');
 
-    const isM = mediaType === 'movie';
-    const stored = isM ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
+    let isM = mediaType === 'movie';
+    let stored = isM ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
+
+    // If not found, the diary entry may have a stale tmdbId — try finding by title
+    if (!stored) {
+      const diaryEntry = Store.getDiary().find(d => d.tmdbId === tmdbId && d.type === mediaType);
+      if (diaryEntry && diaryEntry.title) {
+        const titleLower = diaryEntry.title.toLowerCase();
+        const all = Store.getAll();
+        const match = all.find(x => x.mediaType === mediaType && (x.title || '').toLowerCase() === titleLower);
+        if (match) {
+          // Found the correct entry — update the diary entry's tmdbId and redirect
+          Store.migrateTmdbId(tmdbId, match.tmdbId, mediaType);
+          tmdbId = match.tmdbId;
+          isM = match.mediaType === 'movie';
+          stored = isM ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
+        }
+      }
+    }
+
     let d;
 
     // For MAL-only entries (negative tmdbId), build detail from stored data + Jikan
     if (tmdbId < 0 && stored) {
       d = await this._buildMalDetail(stored, isM);
     } else {
-      try { d = isM ? await TMDB.movieDetails(tmdbId) : await TMDB.tvDetails(tmdbId); }
-      catch (e) {
+      try {
+        // Try the stored type first, then the alternate type on 404
+        try {
+          d = isM ? await TMDB.movieDetails(tmdbId) : await TMDB.tvDetails(tmdbId);
+        } catch (typeErr) {
+          if (typeErr.message && typeErr.message.includes('404')) {
+            // Try alternate type (movie ↔ tv)
+            try {
+              d = isM ? await TMDB.tvDetails(tmdbId) : await TMDB.movieDetails(tmdbId);
+              // Fix the type in store if we have it
+              if (stored) Store.migrateType(tmdbId, isM ? 'movie' : 'tv', isM ? 'tv' : 'movie');
+              isM = !isM;
+            } catch (e2) { throw typeErr; }
+          } else { throw typeErr; }
+        }
+      } catch (e) {
         // If TMDB fails but we have stored data (MAL entry with mapped but broken TMDB ID), use stored + Jikan
         if (stored && stored.malId) {
           d = await this._buildMalDetail(stored, isM);
+        } else if (stored) {
+          // We have stored data but TMDB fetch failed — show what we have with fix options
+          this._renderFailedDetail(page, stored, tmdbId, isM, e.message);
+          return;
         } else {
-          page.innerHTML = `<div style="padding:40px;color:var(--dropped)">Failed: ${e.message}</div>`;
+          page.innerHTML = `
+            <button class="btn-back" onclick="App.showPage(currentView||'watchlist')">Back</button>
+            <div style="padding:40px;color:var(--dropped)">
+              <h3 style="margin-bottom:8px;">Failed to load: ${e.message}</h3>
+              <p style="color:var(--text-2);font-size:13px;">This entry may have been incorrectly matched or removed.</p>
+              <button class="btn-accent" style="margin-top:16px;" onclick="App.showPage(currentView||'watchlist')">Return to List</button>
+            </div>`;
           return;
         }
       }
     }
+
+    // Keep mediaType in sync after potential type swap
+    mediaType = isM ? 'movie' : 'tv';
 
     const inList = !!stored;
     const backdrop = TMDB.backdrop(d.backdrop_path);
@@ -152,6 +197,7 @@ const DetailUI = {
           <div class="detail-actions" style="display:flex; gap:10px; align-items:center;">
             ${actions}
             <button id="detailManualSyncBtn" class="btn-ghost" style="font-size:12px; padding:2px 6px; margin-left:auto; height:auto; min-height:0;">&#128279; Link</button>
+            ${stored && (stored._syncOriginalTitle || stored.syncSource) ? `<span id="detailSyncInfo" class="detail-sync-info-icon" title="${stored._syncOriginalTitle ? 'Imported as: ' + esc(stored._syncOriginalTitle) + (stored._syncOriginalYear ? ' (' + stored._syncOriginalYear + ')' : '') : ''}${stored.syncSource ? (stored._syncOriginalTitle ? ' via ' : 'Source: ') + esc(stored.syncSource) : ''}" style="font-size:14px;color:var(--text-2);cursor:help;">&#9432;</span>` : ''}
             <button id="detailMergeBtn" class="btn-ghost" style="font-size:12px; padding:2px 6px; height:auto; min-height:0;">Merge</button>
             <a href="https://www.themoviedb.org/${isM?'movie':'tv'}/${Math.abs(tmdbId)}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; TMDB</a>
             ${stored && stored.malId ? `<a href="https://myanimelist.net/anime/${stored.malId}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; MAL</a>` : ''}
@@ -167,6 +213,25 @@ const DetailUI = {
             </div>`;
           })()}
           ${dates}
+          ${(() => {
+            // Show original import info if the title was matched differently
+            if (!stored || !stored._syncOriginalTitle) return '';
+            const origTitle = stored._syncOriginalTitle;
+            const origYear = stored._syncOriginalYear;
+            const currentTitle = (title || '').toLowerCase().trim();
+            const origLower = origTitle.toLowerCase().trim();
+            // Only show if titles differ meaningfully
+            if (origLower === currentTitle) return '';
+            const src = stored.syncSource || stored.sourceTag || 'import';
+            return `<div class="detail-sync-info" style="margin-top:8px;padding:8px 12px;border-radius:8px;background:rgba(116,185,255,0.1);border:1px solid rgba(116,185,255,0.25);font-size:12px;color:var(--text-2);display:flex;align-items:center;gap:8px;">
+              <span style="font-size:14px;">&#9432;</span>
+              <div style="flex:1;min-width:0;">
+                <span style="color:var(--text-1);">Imported as:</span> <strong style="color:var(--plan);">${esc(origTitle)}${origYear ? ' ('+origYear+')' : ''}</strong>
+                <span style="opacity:0.6;margin-left:4px;">via ${esc(src)}</span>
+                ${stored.syncSource !== 'anime' ? `<div style="margin-top:4px;font-size:11px;color:var(--text-3);">Wrong match? Use the <strong>Link</strong> button above to fix it.</div>` : ''}
+              </div>
+            </div>`;
+          })()}
         </div>
       </div>
       <div class="detail-body">
@@ -180,7 +245,7 @@ const DetailUI = {
         ${recs.length?`<div class="detail-section"><h3>Recommended</h3><div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;">${recs.map(r=>{const rP=TMDB.poster(r.poster_path,'w185');const rT=r.media_type||(r.first_air_date?'tv':'movie');return`<div class="grid-card" data-tmdb="${r.id}" data-type="${rT}" style="flex-shrink:0;width:130px;"><div class="poster-wrap" style="aspect-ratio:2/3;">${rP?`<img src="${rP}" loading="lazy">`:`<div class="no-poster-ph">${ph}</div>`}<div class="poster-overlay"></div></div><div class="grid-card-info"><div class="grid-card-title">${esc(r.title||r.name)}</div></div></div>`;}).join('')}</div></div>`:''}
       </div>`;
 
-    page.querySelector('#detailBackBtn').addEventListener('click', () => App.showPage('watchlist'));
+    page.querySelector('#detailBackBtn').addEventListener('click', () => App.showPage(currentView || 'watchlist'));
 
     const addBtn = page.querySelector('#detailAddBtn');
     if (addBtn) addBtn.addEventListener('click', () => {
@@ -661,5 +726,68 @@ const DetailUI = {
     }
 
     return d;
+  },
+
+  // Render a fallback detail page when TMDB fetch fails but we have stored data
+  _renderFailedDetail(page, stored, tmdbId, isM, errorMsg) {
+    const poster = TMDB.poster(stored.posterPath, 'w500');
+    const title = stored.title || 'Unknown';
+    const year = stored.year || '';
+    const genres = (stored.genres || []).slice(0, 5);
+    const score = stored.voteAverage ? stored.voteAverage.toFixed(1) : '—';
+    const sl = { watching:'Watching', plan_to_watch:'Plan to Watch', completed:'Completed', on_hold:'On Hold', dropped:'Dropped' };
+    const ws = stored.watchStatus || 'plan_to_watch';
+    const ph = isM ? 'MOV' : 'TV';
+    const origTitle = stored._syncOriginalTitle || '';
+    const origYear = stored._syncOriginalYear || '';
+    const src = stored.syncSource || stored.sourceTag || '';
+
+    page.innerHTML = `
+      <button class="btn-back" id="detailBackBtn">Back</button>
+      <div class="detail-backdrop"><div style="height:100%;background:var(--bg-2)"></div><div class="detail-backdrop-grad"></div></div>
+      <div class="detail-hero">
+        <div class="detail-poster-wrap">${poster ? `<img src="${poster}" class="detail-poster-img">` : `<div class="no-poster-ph" style="width:200px;height:300px;border-radius:12px;">${ph}</div>`}</div>
+        <div class="detail-hero-info">
+          <h1>${esc(title)}</h1>
+          <div class="detail-chips">
+            ${genres.map(g => `<span class="detail-chip">${esc(typeof g === 'string' ? g : g.name)}</span>`).join('')}
+            ${year ? `<span class="detail-chip">${year}</span>` : ''}
+          </div>
+          <div class="detail-stats">
+            ${score !== '—' ? `<div class="detail-stat"><div class="detail-stat-val gold">${score}</div><div class="detail-stat-label">${stored.sourceTag === 'anime' ? 'MAL' : 'TMDB'}</div></div>` : ''}
+            <div class="detail-stat"><div class="detail-stat-val">${sl[ws]}</div><div class="detail-stat-label">Status</div></div>
+          </div>
+
+          <div style="margin-top:12px;padding:12px 14px;border-radius:8px;background:rgba(225,112,85,0.12);border:1px solid rgba(225,112,85,0.3);">
+            <div style="font-size:13px;font-weight:600;color:var(--dropped);margin-bottom:6px;">TMDB lookup failed: ${esc(errorMsg)}</div>
+            <div style="font-size:12px;color:var(--text-2);margin-bottom:8px;">
+              This entry may be incorrectly matched to TMDB.
+              ${origTitle ? `<br>Originally imported as: <strong style="color:var(--plan);">${esc(origTitle)}${origYear ? ' ('+origYear+')' : ''}</strong>${src ? ' via '+esc(src) : ''}` : ''}
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn-accent" id="failedLinkBtn">&#128279; Link to correct TMDB entry</button>
+              <button class="btn-ghost" id="failedRemoveBtn" style="color:var(--dropped);border-color:rgba(225,112,85,0.3);">Remove from list</button>
+            </div>
+          </div>
+
+          <div style="margin-top:8px;display:flex;gap:10px;align-items:center;">
+            <a href="https://www.themoviedb.org/${isM?'movie':'tv'}/${Math.abs(tmdbId)}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; TMDB</a>
+            ${stored.malId ? `<a href="https://myanimelist.net/anime/${stored.malId}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; MAL</a>` : ''}
+          </div>
+        </div>
+      </div>`;
+
+    page.querySelector('#detailBackBtn').addEventListener('click', () => App.showPage(currentView || 'watchlist'));
+    page.querySelector('#failedLinkBtn').addEventListener('click', () => this._manualSyncModal(tmdbId, isM ? 'movie' : 'tv', stored));
+    page.querySelector('#failedRemoveBtn').addEventListener('click', () => {
+      if (confirm('Remove "' + title + '" from your list?')) {
+        if (isM) Store.removeMovie(tmdbId);
+        else Store.removeTvShow(tmdbId);
+        Store.addActivity({ tmdbId, title, type: isM ? 'movie' : 'tv', posterPath: stored.posterPath, action: 'removed', detail: 'Removed (TMDB mismatch)', timestamp: new Date().toISOString() });
+        toast('Removed');
+        App.showPage(currentView || 'watchlist');
+        ListUI.render();
+      }
+    });
   },
 };

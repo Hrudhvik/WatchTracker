@@ -366,6 +366,41 @@ const SyncEngine = {
         continue;
       }
 
+      // FAST PATH: Letterboxd CSV entries with a URI — scrape exact TMDB ID from the page
+      // Only attempt for small imports to avoid rate limiting and slowness on large diary files
+      if (entry.source === 'letterboxd-csv' && entry.letterboxdUri && entries.length <= 25) {
+        try {
+          const res = await bgFetch(entry.letterboxdUri);
+          if (res && res.ok && res.body) {
+            const linkMatch = res.body.match(/href="[^"]*themoviedb\.org\/(movie|tv)\/(\d+)[^"]*"[^>]*data-track-action="TMDb"/i);
+            const bodyMatch = !linkMatch && res.body.match(/data-tmdb-id="(\d+)"/);
+            const typeMatch = !linkMatch && res.body.match(/data-tmdb-type="([^"]+)"/);
+            const tmdbId = linkMatch ? parseInt(linkMatch[2]) : (bodyMatch ? parseInt(bodyMatch[1]) : null);
+            const tmdbType = linkMatch ? linkMatch[1] : (typeMatch ? typeMatch[1] : 'movie');
+
+            if (tmdbId) {
+              results.push({
+                ...entry,
+                tmdbId,
+                tmdbTitle: entry.title,
+                tmdbType,
+                tmdbPoster: null,
+                tmdbYear: entry.year || 0,
+                tmdbRating: entry.rating || 0,
+                matched: true,
+              });
+              matched++;
+              await new Promise(r => setTimeout(r, 250));
+              continue;
+            }
+          }
+        } catch (e) {
+          // Non-fatal — fall through to TMDB text search
+          console.warn('[matchToTmdb] Letterboxd URI fetch failed for', entry.title, '— falling back to search');
+        }
+        await new Promise(r => setTimeout(r, 250));
+      }
+
       try {
         let match = null;
         let tmdbType = entry.type === 'movie' ? 'movie' : 'tv';
@@ -411,7 +446,7 @@ const SyncEngine = {
           if (isMal) {
             match = this._pickBestAnimeMatch(searchResults, typeFilter, entry);
           } else {
-            match = searchResults.find(r => r.media_type === typeFilter);
+            match = this._pickBestMatch(searchResults, typeFilter, entry);
           }
 
           // Retry with original title if English title search failed
@@ -541,6 +576,45 @@ const SyncEngine = {
     return best || candidates[0];
   },
 
+  // Pick the best TMDB result for a general movie/TV entry using year + title scoring
+  _pickBestMatch(searchResults, typeFilter, entry) {
+    const candidates = searchResults.filter(r => r.media_type === typeFilter);
+    if (!candidates.length) return null;
+    if (candidates.length === 1) return candidates[0];
+
+    let bestScore = -1;
+    let best = null;
+
+    for (const r of candidates) {
+      let score = 0;
+
+      // Exact title match is the strongest signal
+      const rTitle = (r.media_type === 'movie' ? r.title : r.name) || '';
+      if (rTitle.toLowerCase() === (entry.title || '').toLowerCase()) score += 50;
+      // Partial containment (e.g. "Ted" matching "Ted")
+      else if (rTitle.toLowerCase().includes((entry.title || '').toLowerCase())) score += 15;
+
+      // Year match — critical for disambiguation (e.g. "Wicked" 2024 vs older)
+      if (entry.year) {
+        const rDate = r.media_type === 'movie' ? r.release_date : r.first_air_date;
+        const rYear = parseInt((rDate || '').substring(0, 4)) || 0;
+        if (rYear && rYear === entry.year) score += 40;
+        else if (rYear && Math.abs(rYear - entry.year) === 1) score += 20;
+        else if (rYear && Math.abs(rYear - entry.year) <= 3) score += 5;
+      }
+
+      // Popularity tiebreaker — TMDB's popularity score, slight boost for well-known entries
+      if (r.popularity) score += Math.min(r.popularity / 100, 5);
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = r;
+      }
+    }
+
+    return best || candidates[0];
+  },
+
   // Fetch anime info from Jikan — returns { titleEnglish, poster, year } or null
   async _fetchJikanInfo(malId) {
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -656,8 +730,21 @@ const SyncEngine = {
         if (entry.tmdbId && entry.tmdbId > 0) {
           const existingTmdb = isMovie ? Store.getMovie(entry.tmdbId) : Store.getTvShow(entry.tmdbId);
           if (existingTmdb && existingTmdb.sourceTag !== 'anime') {
+            // Migrate diary & activity before removing
+            Store.migrateTmdbId(entry.tmdbId, storeId, isMovie ? 'movie' : 'tv');
             if (isMovie) Store.removeMovie(entry.tmdbId);
             else Store.removeTvShow(entry.tmdbId);
+          }
+
+          // If this entry was previously stored with a negative MAL-only ID, migrate to TMDB ID
+          if (entry.malId) {
+            const oldNegId = -entry.malId;
+            const oldEntry = isMovie ? Store.getMovie(oldNegId) : Store.getTvShow(oldNegId);
+            if (oldEntry) {
+              Store.migrateTmdbId(oldNegId, storeId, isMovie ? 'movie' : 'tv');
+              if (isMovie) Store.removeMovie(oldNegId);
+              else Store.removeTvShow(oldNegId);
+            }
           }
         }
         // Also check by normalized title if storeId is negative
@@ -668,6 +755,8 @@ const SyncEngine = {
             if (item.sourceTag === 'anime') continue; // don't remove other MAL entries
             const itemNorm = (item.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
             if (itemNorm && itemNorm === normTitle) {
+              // Migrate diary & activity to the new storeId before removing
+              Store.migrateTmdbId(item.tmdbId, storeId, item.mediaType);
               if (item.mediaType === 'movie') Store.removeMovie(item.tmdbId);
               else Store.removeTvShow(item.tmdbId);
               break;
@@ -714,6 +803,8 @@ const SyncEngine = {
             dateUpdated: now,
             syncSource: entry.source,
             sourceTag,
+            _syncOriginalTitle: entry.title || '',
+            _syncOriginalYear: entry.year || null,
           });
         } else {
           const epsWatched = entry.episodesWatched || 0;
@@ -739,6 +830,8 @@ const SyncEngine = {
             dateUpdated: now,
             syncSource: entry.source,
             sourceTag,
+            _syncOriginalTitle: entry.title || '',
+            _syncOriginalYear: entry.year || null,
           });
         }
         added++;
@@ -764,8 +857,11 @@ const SyncEngine = {
       // Diary entry
       if (entry.watchDate) {
         const effectiveRating = malRatings[storeId] || malRatings['mal-' + entry.malId] || entry.rating || null;
+        const entryTitle = (entry.tmdbTitle || entry.title || '').toLowerCase();
+        const entryType = isMovie ? 'movie' : 'tv';
         const existingDiary = Store.getDiary().find(d =>
-          d.tmdbId === storeId && d.date === entry.watchDate && d.type === (isMovie ? 'movie' : 'tv')
+          d.date === entry.watchDate && d.type === entryType &&
+          (d.tmdbId === storeId || (d.title || '').toLowerCase() === entryTitle)
         );
         if (!existingDiary) {
           Store.addDiaryEntry({
@@ -793,12 +889,27 @@ const SyncEngine = {
     for (let i = 0; i < uniqueKeys.length; i++) {
       const [idStr, type] = uniqueKeys[i].split(':');
       const tmdbId = parseInt(idStr);
+      if (progressCb) progressCb(idx + i, idx + uniqueKeys.length, 'Enriching: ' + (type === 'movie' ? Store.getMovie(tmdbId)?.title : Store.getTvShow(tmdbId)?.title) || tmdbId);
       try {
-        const d = type === 'movie'
-          ? await TMDB.movieDetails(tmdbId)
-          : await TMDB.tvDetails(tmdbId);
+        let d;
+        try {
+          d = type === 'movie' ? await TMDB.movieDetails(tmdbId) : await TMDB.tvDetails(tmdbId);
+        } catch (typeErr) {
+          // Type mismatch — movie on source might be TV on TMDB or vice versa
+          if (typeErr.message && typeErr.message.includes('404')) {
+            const altType = type === 'movie' ? 'tv' : 'movie';
+            try {
+              d = altType === 'movie' ? await TMDB.movieDetails(tmdbId) : await TMDB.tvDetails(tmdbId);
+              // Fix the type in store
+              Store.migrateType(tmdbId, type, altType);
+            } catch (e2) { throw typeErr; } // re-throw original if alt also fails
+          } else {
+            throw typeErr;
+          }
+        }
 
-        if (type === 'movie') {
+        const actualType = d.title ? 'movie' : 'tv';
+        if (actualType === 'movie') {
           const updates = {
             backdropPath: d.backdrop_path,
             runtime: d.runtime || 0,
@@ -1603,230 +1714,260 @@ const ImportExport = {
       else if (name.includes('ratings')) ratingsCSV = this._parseCSVLines(text);
     }
 
-    const uriCol = (r) => {
-      if (!r) return -1;
-      return r.map(c => c.toLowerCase().trim()).indexOf('letterboxd uri');
-    };
+    // ── Helpers ──
+    const uriCol = (r) => r ? r.map(c => c.toLowerCase().trim()).indexOf('letterboxd uri') : -1;
 
-    // Parse ratings map (convert 5 scale to 10 scale)
+    // Build ratings map (URI → rating on 10-point scale)
     const ratingMap = {};
     if (ratingsCSV.length > 1) {
       const uI = uriCol(ratingsCSV[0]);
       const rI = ratingsCSV[0].map(c => c.toLowerCase().trim()).indexOf('rating');
       if (uI > -1 && rI > -1) {
         for (let i = 1; i < ratingsCSV.length; i++) {
-          const uri = ratingsCSV[i][uI];
+          const uri = (ratingsCSV[i][uI] || '').trim();
           const r = parseFloat(ratingsCSV[i][rI]);
-          if (uri && !isNaN(r)) ratingMap[uri] = r * 2;
+          if (uri && !isNaN(r) && r > 0) ratingMap[uri] = r <= 5 ? Math.round(r * 2) : Math.round(r);
         }
       }
     }
 
-    const tmdbCache = {}; // cache: letterboxd URI -> { type, id }
+    // TMDB ID cache: letterboxd URI → { type, id }
+    const tmdbCache = {};
 
     const getTmdbId = async (uri) => {
+      if (!uri) return null;
       if (tmdbCache[uri]) return tmdbCache[uri];
       try {
         const res = await bgFetch(uri);
-        if (!res || !res.body) { console.warn('[LB Import] Empty response for:', uri); return null; }
-        
+        if (!res || !res.ok || !res.body) return null;
+
         const linkMatch = res.body.match(/href="[^"]*themoviedb\.org\/(movie|tv)\/(\d+)[^"]*"[^>]*data-track-action="TMDb"/i);
         if (linkMatch) { tmdbCache[uri] = { type: linkMatch[1], id: parseInt(linkMatch[2]) }; return tmdbCache[uri]; }
-        
+
         const bodyMatch = res.body.match(/data-tmdb-id="(\d+)"/);
         const typeMatch = res.body.match(/data-tmdb-type="([^"]+)"/);
         if (bodyMatch) { tmdbCache[uri] = { type: (typeMatch ? typeMatch[1] : 'movie'), id: parseInt(bodyMatch[1]) }; return tmdbCache[uri]; }
-        
-        console.warn('[LB Import] No TMDB ID found on page:', uri);
       } catch (e) {
-         console.error('[LB Import] Failed fetching Letterboxd URI:', uri, e);
+        console.warn('[LB Import] URI fetch failed:', uri, e.message);
       }
       return null;
     };
 
-    const addMovie = async (uri, title, status) => {
-      const tmdbData = await getTmdbId(uri);
-      if (!tmdbData) return null;
+    const addToStore = async (tmdbData, title, status, origTitle, origYear) => {
       const tmdbId = tmdbData.id;
       const type = tmdbData.type;
 
       if (type === 'movie') {
-        if (Store.hasMovie(tmdbId)) {
-           Store.updateMovie(tmdbId, { watchStatus: status });
-        } else {
+        if (!Store.hasMovie(tmdbId)) {
           try {
             const d = await TMDB.movieDetails(tmdbId);
             Store.addMovie({
-              tmdbId,
-              title: d.title || title,
-              posterPath: d.poster_path || null,
+              tmdbId, title: d.title || title, posterPath: d.poster_path || null,
               backdropPath: d.backdrop_path || null,
               year: parseInt((d.release_date || '').substring(0, 4)) || 0,
-              voteAverage: d.vote_average || 0,
-              runtime: d.runtime || 0,
-              genres: (d.genres || []).map(g => g.name),
-              watchStatus: status,
-              rewatchCount: 0,
-              rewatchHistory: [],
-              startDate: '',
-              endDate: '',
-              dateAdded: new Date().toISOString(),
-              dateUpdated: new Date().toISOString()
+              voteAverage: d.vote_average || 0, runtime: d.runtime || 0,
+              genres: (d.genres || []).map(g => g.name), watchStatus: status,
+              rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '',
+              dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString(),
+              syncSource: 'letterboxd-csv', sourceTag: 'tmdb',
+              _syncOriginalTitle: origTitle || '', _syncOriginalYear: origYear || null,
             });
           } catch (e) {
-            console.error('Failed fetching TMDB details for movie:', tmdbId);
+            // TMDB details failed — add with basic info
+            Store.addMovie({
+              tmdbId, title, posterPath: null, backdropPath: null,
+              year: origYear || 0, voteAverage: 0, runtime: 0, genres: [],
+              watchStatus: status, rewatchCount: 0, rewatchHistory: [],
+              startDate: '', endDate: '',
+              dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString(),
+              syncSource: 'letterboxd-csv', sourceTag: 'tmdb',
+              _syncOriginalTitle: origTitle || '', _syncOriginalYear: origYear || null,
+            });
           }
+        } else {
+          Store.updateMovie(tmdbId, { watchStatus: status, dateUpdated: new Date().toISOString() });
         }
       } else {
-        if (Store.hasTvShow(tmdbId)) {
-           Store.updateTvShow(tmdbId, { watchStatus: status });
-        } else {
+        if (!Store.hasTvShow(tmdbId)) {
           try {
             const d = await TMDB.tvDetails(tmdbId);
             const ss = (d.seasons || []).filter(s => s.season_number > 0);
             Store.addTvShow({
-              tmdbId,
-              title: d.name || title,
-              posterPath: d.poster_path || null,
+              tmdbId, title: d.name || title, posterPath: d.poster_path || null,
               backdropPath: d.backdrop_path || null,
               year: parseInt((d.first_air_date || '').substring(0, 4)) || 0,
               voteAverage: d.vote_average || 0,
-              totalSeasons: d.number_of_seasons || 0,
-              totalEpisodes: d.number_of_episodes || 0,
-              genres: (d.genres || []).map(g => g.name),
-              watchStatus: status,
-              rewatchCount: 0,
-              rewatchHistory: [],
-              startDate: '',
-              endDate: '',
+              totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0,
+              genres: (d.genres || []).map(g => g.name), watchStatus: status,
+              rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '',
               seasons: ss.map(s => ({ seasonNumber: s.season_number, episodeCount: s.episode_count || 0, episodesWatched: 0, posterPath: s.poster_path })),
-              dateAdded: new Date().toISOString(),
-              dateUpdated: new Date().toISOString()
+              dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString(),
+              syncSource: 'letterboxd-csv', sourceTag: 'tmdb',
+              _syncOriginalTitle: origTitle || '', _syncOriginalYear: origYear || null,
             });
           } catch (e) {
-            console.error('Failed fetching TMDB details for TV:', tmdbId);
+            Store.addTvShow({
+              tmdbId, title, posterPath: null, backdropPath: null,
+              year: origYear || 0, voteAverage: 0, totalSeasons: 0, totalEpisodes: 0,
+              genres: [], watchStatus: status, rewatchCount: 0, rewatchHistory: [],
+              startDate: '', endDate: '', seasons: [],
+              dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString(),
+              syncSource: 'letterboxd-csv', sourceTag: 'tmdb',
+              _syncOriginalTitle: origTitle || '', _syncOriginalYear: origYear || null,
+            });
           }
+        } else {
+          Store.updateTvShow(tmdbId, { watchStatus: status, dateUpdated: new Date().toISOString() });
         }
       }
       return tmdbData;
     };
 
-    let c = 0;
-    const t = Math.max(0, watchedCSV.length - 1) + Math.max(0, watchlistCSV.length - 1) + Math.max(0, diaryCSV.length - 1);
+    // ── Count total work ──
+    const totalRows = Math.max(0, watchedCSV.length - 1) + Math.max(0, diaryCSV.length - 1) + Math.max(0, watchlistCSV.length - 1);
+    let processed = 0;
+    let added = 0, skipped = 0, diaryAdded = 0;
 
-    // Process Watched
+    // ── Process Watched ──
     if (watchedCSV.length > 1) {
       const uI = uriCol(watchedCSV[0]);
-      const nI = watchedCSV[0].map(c => c.toLowerCase().trim()).indexOf('name');
+      const h = watchedCSV[0].map(c => c.toLowerCase().trim());
+      const nI = h.indexOf('name');
+      const yI = h.indexOf('year');
       for (let i = 1; i < watchedCSV.length; i++) {
-        const uri = watchedCSV[i][uI];
-        const name = watchedCSV[i][nI];
-        if (!uri) continue;
-        
-        c++;
-        if (progressCb) progressCb(c, t, 'Watched: ' + name);
-        
-        const tmdbData = await addMovie(uri, name, 'completed');
-        // We do not add to diary here because watched.csv contains no dates
-        // and we only want explicitly logged items in the diary.
+        const uri = uI > -1 ? (watchedCSV[i][uI] || '').trim() : '';
+        const name = nI > -1 ? (watchedCSV[i][nI] || '').trim() : '';
+        const year = yI > -1 ? parseInt(watchedCSV[i][yI]) || null : null;
+        if (!uri) { processed++; continue; }
+
+        processed++;
+        if (progressCb) progressCb(processed, totalRows, `Watched: ${name}`);
+
+        const tmdb = await getTmdbId(uri);
+        if (tmdb) { await addToStore(tmdb, name, 'completed', name, year); added++; }
+        else { skipped++; }
+        await new Promise(r => setTimeout(r, 120));
       }
     }
 
-    // Process Watchlist
+    // ── Process Watchlist ──
     if (watchlistCSV.length > 1) {
       const uI = uriCol(watchlistCSV[0]);
-      const nI = watchlistCSV[0].map(c => c.toLowerCase().trim()).indexOf('name');
+      const h = watchlistCSV[0].map(c => c.toLowerCase().trim());
+      const nI = h.indexOf('name');
+      const yI = h.indexOf('year');
       for (let i = 1; i < watchlistCSV.length; i++) {
-        const uri = watchlistCSV[i][uI];
-        const name = watchlistCSV[i][nI];
-        if (!uri) continue;
-        
-        c++;
-        if (progressCb) progressCb(c, t, 'Watchlist: ' + name);
-        
-        await addMovie(uri, name, 'plan_to_watch');
+        const uri = uI > -1 ? (watchlistCSV[i][uI] || '').trim() : '';
+        const name = nI > -1 ? (watchlistCSV[i][nI] || '').trim() : '';
+        const year = yI > -1 ? parseInt(watchlistCSV[i][yI]) || null : null;
+        if (!uri) { processed++; continue; }
+
+        processed++;
+        if (progressCb) progressCb(processed, totalRows, `Watchlist: ${name}`);
+
+        const tmdb = await getTmdbId(uri);
+        if (tmdb) { await addToStore(tmdb, name, 'plan_to_watch', name, year); added++; }
+        else { skipped++; }
+        await new Promise(r => setTimeout(r, 120));
       }
     }
 
-    // Process Diary
+    // ── Build a title→tmdbData lookup from cache for diary cross-referencing ──
+    // Diary URIs point to diary entries, not film pages, so they may not have TMDB IDs.
+    // We use the film URIs from watched.csv (already cached) to resolve diary entries by title.
+    const titleCache = {}; // 'title|||year' → tmdbData
+    for (const [uri, tmdbData] of Object.entries(tmdbCache)) {
+      // We don't have the title directly in the cache, so we build it during processing
+    }
+
+    // ── Process Diary (entries with watch dates → diary logs) ──
     if (diaryCSV.length > 1) {
       const h = diaryCSV[0].map(c => c.toLowerCase().trim());
       const uI = uriCol(diaryCSV[0]);
       const nI = h.indexOf('name');
+      const yI = h.indexOf('year');
       const rI = h.indexOf('rating');
       const rwI = h.indexOf('rewatch');
       const ldI = h.indexOf('date');
-      const wdI = h.indexOf('watched date');
-
-      console.log('[LB Import] Diary headers:', h);
-      console.log('[LB Import] Diary column indices — URI:', uI, 'Name:', nI, 'Rating:', rI, 'Date:', ldI, 'Watched Date:', wdI);
-      console.log('[LB Import] Diary rows:', diaryCSV.length - 1);
-
-      if (uI === -1) {
-        console.error('[LB Import] Could not find "Letterboxd URI" column in diary.csv! Headers:', h);
-      }
+      const wdI = h.findIndex(x => x === 'watched date');
 
       for (let i = 1; i < diaryCSV.length; i++) {
         const row = diaryCSV[i];
-        const uri = row[uI] ? row[uI].trim() : '';
+        const uri = uI > -1 ? (row[uI] || '').trim() : '';
         const name = nI > -1 ? (row[nI] || '').trim() : '';
-        if (!uri) { console.warn('[LB Import] Diary row', i, 'has no URI, skipping'); continue; }
+        const year = yI > -1 ? parseInt(row[yI]) || null : null;
+        if (!name) { processed++; continue; }
 
-        c++;
-        if (progressCb) progressCb(c, t, 'Diary: ' + name);
+        processed++;
+        if (progressCb) progressCb(processed, totalRows, `Diary: ${name}`);
 
         let rating = null;
         if (rI > -1 && row[rI]) {
           const rv = parseFloat(row[rI]);
-          if (!isNaN(rv) && rv > 0) rating = rv * 2;
+          if (!isNaN(rv) && rv > 0) rating = rv <= 5 ? Math.round(rv * 2) : Math.round(rv);
         }
-        if (!rating) rating = ratingMap[uri] || null;
+        if (!rating && uri) rating = ratingMap[uri] || null;
 
-        const tmdbData = await getTmdbId(uri);
-        if (tmdbData) {
-          const exists = tmdbData.type === 'movie' ? Store.hasMovie(tmdbData.id) : Store.hasTvShow(tmdbData.id);
-          if (!exists) {
-             await addMovie(uri, name, 'completed');
-          } else {
-             if (tmdbData.type === 'movie') Store.updateMovie(tmdbData.id, { watchStatus: 'completed' });
-             else Store.updateTvShow(tmdbData.id, { watchStatus: 'completed' });
+        // Find TMDB ID: first check if movie is already in store (from watched.csv), then try URI
+        let tmdb = null;
+
+        // 1. Look up by title in the store (already added from watched.csv)
+        const allItems = Store.getAll();
+        const titleLower = name.toLowerCase();
+        const storeMatch = allItems.find(x =>
+          (x.title || '').toLowerCase() === titleLower &&
+          (!year || !x.year || Math.abs(x.year - year) <= 1)
+        );
+        if (storeMatch) {
+          tmdb = { type: storeMatch.mediaType, id: storeMatch.tmdbId };
+        }
+
+        // 2. Fall back to URI fetch (diary URIs may not resolve, but try)
+        if (!tmdb && uri) {
+          tmdb = await getTmdbId(uri);
+          if (!tmdb) await new Promise(r => setTimeout(r, 120));
+        }
+
+        if (tmdb) {
+          // Ensure movie exists in store
+          if (!(tmdb.type === 'movie' ? Store.hasMovie(tmdb.id) : Store.hasTvShow(tmdb.id))) {
+            await addToStore(tmdb, name, 'completed', name, year);
           }
 
-          let wDate = wdI > -1 ? (row[wdI] || '').trim() : '';
-          let lDate = ldI > -1 ? (row[ldI] || '').trim() : '';
-          let date = wDate || lDate || '';
-          const action = (rwI > -1 && (row[rwI] || '').trim() === 'Yes') ? 'rewatch' : 'watched';
+          // Create diary entry
+          const wDate = wdI > -1 ? (row[wdI] || '').trim() : '';
+          const lDate = ldI > -1 ? (row[ldI] || '').trim() : '';
+          const date = wDate || lDate || '';
+          const action = (rwI > -1 && (row[rwI] || '').trim().toLowerCase() === 'yes') ? 'rewatch' : 'watched';
 
-          // Get poster from store for the diary entry
-          const stored = tmdbData.type === 'movie' ? Store.getMovie(tmdbData.id) : Store.getTvShow(tmdbData.id);
+          const stored = tmdb.type === 'movie' ? Store.getMovie(tmdb.id) : Store.getTvShow(tmdb.id);
           const posterPath = stored ? stored.posterPath : null;
 
-          const existingDiary = Store.getDiary().find(d => d.tmdbId === tmdbData.id && d.date === date && d.type === tmdbData.type);
-          if (!existingDiary) {
-             Store.addDiaryEntry({
-               tmdbId: tmdbData.id,
-               title: name,
-               type: tmdbData.type,
-               posterPath,
-               date,
-               action,
-               notes: 'Letterboxd Diary Import',
-               rating,
-               mood: null,
-               episodes: null,
-               season: null,
-               timestamp: new Date().toISOString()
-             });
-          } else if (rating && !existingDiary.rating) {
-             Store.updateDiaryEntry(existingDiary.timestamp, { rating });
+          // Dedup by tmdbId+date+type OR title+date+type
+          const existing = Store.getDiary().find(d =>
+            d.date === date && d.type === tmdb.type &&
+            (d.tmdbId === tmdb.id || (d.title || '').toLowerCase() === titleLower)
+          );
+          if (!existing && date) {
+            Store.addDiaryEntry({
+              tmdbId: tmdb.id, title: stored ? stored.title : name,
+              type: tmdb.type, posterPath, date, action,
+              notes: '', rating,
+              mood: null, episodes: null, season: null,
+              timestamp: new Date().toISOString(),
+            });
+            diaryAdded++;
           }
+          added++;
         } else {
-          console.warn('[LB Import] Diary: no TMDB match for', name, uri);
+          skipped++;
+          console.warn('[LB Import] Diary: could not resolve', name, uri);
         }
       }
-    } else {
-      console.log('[LB Import] No diary.csv data found (diaryCSV length:', diaryCSV.length, ')');
     }
+
+    console.log('[LB Import] Done — added:', added, 'skipped:', skipped, 'diary:', diaryAdded);
+    return { added, updated: 0, skipped, diaryAdded };
   },
 
   _parseCSVLines(text) {

@@ -28,14 +28,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // ─── Alarm: periodic sync reminder ───
 chrome.alarms?.onAlarm?.addListener(async (alarm) => {
   if (alarm.name !== 'watchtracker-sync') return;
-  const data = await chrome.storage.local.get(['syncConfig', 'apiKey']);
-  const config = data.syncConfig;
-  if (!config || !data.apiKey) return;
-  if (config.letterboxd || config.mal) {
-    chrome.action.setBadgeText({ text: 'sync' });
-    chrome.action.setBadgeBackgroundColor({ color: '#6c5ce7' });
-    setTimeout(() => chrome.action.setBadgeText({ text: '' }), 30 * 60 * 1000);
-  }
+  // Alarm fires but no badge — sync happens when user opens the app
 });
 
 chrome.runtime.onInstalled?.addListener(async () => {

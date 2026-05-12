@@ -72,6 +72,39 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
+  // ─── List Search (expandable) ───
+  const listSearchWrap = document.getElementById('listSearchWrap');
+  const listSearchToggle = document.getElementById('listSearchToggle');
+  const listSearchInput = document.getElementById('listSearchInput');
+  let listSearchTimeout;
+  listSearchToggle.addEventListener('click', () => {
+    const open = listSearchWrap.classList.toggle('open');
+    if (open) { listSearchInput.focus(); }
+    else { listSearchInput.value = ''; ListUI._searchQuery = ''; ListUI.render(); }
+  });
+  listSearchInput.addEventListener('input', () => {
+    clearTimeout(listSearchTimeout);
+    listSearchTimeout = setTimeout(() => {
+      ListUI._searchQuery = listSearchInput.value.trim().toLowerCase();
+      ListUI.render();
+    }, 200);
+  });
+  listSearchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { listSearchWrap.classList.remove('open'); listSearchInput.value = ''; ListUI._searchQuery = ''; ListUI.render(); }
+  });
+
+  // ─── Scroll to Top ───
+  const scrollTopBtn = document.getElementById('scrollTopBtn');
+  document.querySelectorAll('.page').forEach(page => {
+    page.addEventListener('scroll', () => {
+      scrollTopBtn.classList.toggle('hidden', page.scrollTop < 400);
+    });
+  });
+  scrollTopBtn.addEventListener('click', () => {
+    const activePage = document.querySelector('.page.active-page');
+    if (activePage) activePage.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
   // ─── Search Overlay ───
   const overlay = document.getElementById('searchOverlay');
   const overlayInput = document.getElementById('overlaySearchInput');
@@ -319,10 +352,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await enqueueTask('Importing Letterboxd', async () => {
       try {
-        await ImportExport.processLetterboxdFiles(files, (c, t, msg) => {
-          updateSyncProgress(Math.floor((c / t) * 100), msg);
+        const stats = await ImportExport.processLetterboxdFiles(files, (c, t, msg) => {
+          updateSyncProgress(Math.floor((c / Math.max(t, 1)) * 100), msg);
         });
-        toast('Letterboxd import complete!');
+        if (stats) {
+          toast(`Letterboxd: +${stats.added} added, ${stats.diaryAdded} diary, ${stats.skipped} skipped`);
+        } else {
+          toast('Letterboxd import complete — no entries found');
+        }
       } catch (err) {
         toast('Letterboxd import failed: ' + err.message);
       }

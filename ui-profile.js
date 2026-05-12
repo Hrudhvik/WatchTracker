@@ -20,7 +20,7 @@ const ProfileUI = {
     const recent = diary
       .filter(d => ['watched', 'rewatch'].includes(d.action))
       .sort((a,b) => new Date(b.date || b.timestamp) - new Date(a.date || a.timestamp))
-      .slice(0, 8)
+      .slice(0, 10)
       .map(d => {
          const m = d.type === 'movie' ? movies.find(x => x.tmdbId === d.tmdbId) : tvshows.find(x => x.tmdbId === d.tmdbId);
          return { tmdbId: d.tmdbId, mediaType: d.type, title: d.title, posterPath: d.posterPath || (m ? m.posterPath : null), year: m ? m.year : '' };

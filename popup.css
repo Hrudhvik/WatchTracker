@@ -242,15 +242,16 @@ html, body {
 .p-score { font-size: 11px; color: var(--ptext-2); margin-top: 1px; }
 
 /* ─── Grid view ─── */
-.p-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 8px 10px; }
-.p-grid-card { cursor: pointer; transition: transform 0.12s; }
+.p-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 8px 10px; }
+.p-grid-card { cursor: pointer; transition: transform 0.12s; overflow: hidden; min-width: 0; }
 .p-grid-card:hover { transform: translateY(-2px); }
 .p-grid-poster {
   border-radius: 4px; overflow: hidden;
   aspect-ratio: 2/3; background: var(--pbg-2); position: relative;
+  width: 100%;
 }
 .p-grid-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.p-grid-poster .p-poster-ph { font-size: 10px; }
+.p-grid-poster .p-poster-ph { width: 100%; height: 100%; font-size: 10px; }
 .p-grid-bar { position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: rgba(0,0,0,0.4); }
 .p-grid-bar-fill { height: 100%; }
 .p-grid-title {

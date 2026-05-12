@@ -250,14 +250,23 @@ function renderPopupDiary() {
     return;
   }
 
+  const movies = Store.getMovies();
+  const tvshows = Store.getTvShows();
   const actLabels = { completed:'Completed', rewatch:'Rewatched', watched:'Watched', watched_episodes:'Watched eps', started:'Started', session:'Session' };
+
+  // Enrich diary entries with poster fallback from store
+  const enriched = diary.map(e => {
+    if (e.posterPath) return e;
+    const m = e.type === 'movie' ? movies.find(x => x.tmdbId === e.tmdbId) : tvshows.find(x => x.tmdbId === e.tmdbId);
+    return { ...e, posterPath: m ? m.posterPath : null };
+  });
 
   // Group by date
   const grouped = {};
-  diary.forEach(e => { const d = e.date || 'Unknown'; if (!grouped[d]) grouped[d] = []; grouped[d].push(e); });
+  enriched.forEach(e => { const d = e.date || 'Unknown'; if (!grouped[d]) grouped[d] = []; grouped[d].push(e); });
 
   let html = '<div class="pd-diary-tl">';
-  Object.keys(grouped).forEach(date => {
+  Object.keys(grouped).sort((a, b) => b.localeCompare(a)).forEach(date => {
     const dateObj = new Date(date + 'T12:00:00');
     const valid = !isNaN(dateObj.getTime());
     const dayNum = valid ? dateObj.getDate() : '?';
@@ -267,7 +276,7 @@ function renderPopupDiary() {
     html += `<div class="pd-tl-day"><div class="pd-tl-marker"><div class="pd-tl-num">${dayNum}</div><div class="pd-tl-mon">${mon}</div><div class="pd-tl-dn">${dayName}</div></div><div class="pd-tl-entries">`;
 
     grouped[date].forEach(e => {
-      const poster = e.posterPath ? `https://image.tmdb.org/t/p/w92${e.posterPath}` : '';
+      const poster = TMDB.poster(e.posterPath, 'w92');
       const act = actLabels[e.action] || e.action || 'Logged';
       const rating = e.rating ? ` · ★ ${e.rating}/10` : '';
       const season = e.season ? ` · S${e.season}` : '';
@@ -389,7 +398,7 @@ function renderList() {
 
   if (pView === 'grid') {
     el.innerHTML = `<div class="p-grid">${items.map(i => {
-      const img = i.posterPath ? `https://image.tmdb.org/t/p/w185${i.posterPath}` : '';
+      const img = TMDB.poster(i.posterPath, 'w185');
       const pct = getPct(i); const f = fc[i.watchStatus] || 'fill-plan';
       return `<div class="p-grid-card" data-tmdb="${i.tmdbId}" data-type="${i.mediaType}">
         <div class="p-grid-poster">${img ? `<img src="${img}">` : `<div class="p-poster-ph">${i.mediaType==='movie'?'MOV':'TV'}</div>`}
@@ -398,7 +407,7 @@ function renderList() {
     }).join('')}</div>`;
   } else {
     el.innerHTML = items.map(i => {
-      const img = i.posterPath ? `https://image.tmdb.org/t/p/w92${i.posterPath}` : '';
+      const img = TMDB.poster(i.posterPath, 'w92');
       const pct = getPct(i); const f = fc[i.watchStatus] || 'fill-plan';
       const eps = getEps(i); const score = i.voteAverage ? i.voteAverage.toFixed(1) : '';
       return `<div class="p-item" data-tmdb="${i.tmdbId}" data-type="${i.mediaType}">
@@ -480,12 +489,27 @@ function showDetail(tmdbId, mediaType) {
   document.getElementById('pEmpty').classList.add('hidden');
 
   const isM = mediaType === 'movie';
-  const stored = isM ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
+  let stored = isM ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
   const el = document.getElementById('pList');
+
+  // If not found, diary entry may have a stale tmdbId — recover by title
+  if (!stored) {
+    const diaryEntry = Store.getDiary().find(d => d.tmdbId === tmdbId && d.type === mediaType);
+    if (diaryEntry && diaryEntry.title) {
+      const titleLower = diaryEntry.title.toLowerCase();
+      const all = Store.getAll();
+      const match = all.find(x => x.mediaType === mediaType && (x.title || '').toLowerCase() === titleLower);
+      if (match) {
+        Store.migrateTmdbId(tmdbId, match.tmdbId, mediaType);
+        tmdbId = match.tmdbId;
+        stored = match.mediaType === 'movie' ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
+      }
+    }
+  }
 
   if (!stored) { showTMDBDetail(tmdbId, mediaType); return; }
 
-  const poster = stored.posterPath ? `https://image.tmdb.org/t/p/w185${stored.posterPath}` : '';
+  const poster = TMDB.poster(stored.posterPath, 'w185');
   const genres = (stored.genres || []).slice(0, 4);
   const score = stored.voteAverage ? stored.voteAverage.toFixed(1) : '—';
   const scoreLabel = stored.sourceTag === 'anime' ? 'MAL' : 'TMDB';
@@ -598,7 +622,7 @@ async function searchTMDB(query) {
       const isM = r.media_type === 'movie';
       const title = isM ? r.title : r.name;
       const yr = ((isM ? r.release_date : r.first_air_date) || '').substring(0, 4);
-      const poster = r.poster_path ? `https://image.tmdb.org/t/p/w92${r.poster_path}` : '';
+      const poster = TMDB.poster(r.poster_path, 'w92');
       const inList = isM ? Store.hasMovie(r.id) : Store.hasTvShow(r.id);
       return `<div class="p-search-item" data-id="${r.id}" data-type="${r.media_type}">
         <div class="p-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">${isM?'MOV':'TV'}</div>`}</div>
@@ -655,7 +679,7 @@ async function showTMDBDetail(tmdbId, mediaType) {
     const d = isM ? await TMDB.movieDetails(tmdbId) : await TMDB.tvDetails(tmdbId);
     const title = isM ? d.title : d.name;
     const year = (isM ? d.release_date : d.first_air_date || '').substring(0, 4);
-    const poster = d.poster_path ? `https://image.tmdb.org/t/p/w185${d.poster_path}` : '';
+    const poster = TMDB.poster(d.poster_path, 'w185');
     const genres = (d.genres || []).slice(0, 4);
     const score = d.vote_average ? d.vote_average.toFixed(1) : '—';
     const overview = (d.overview || '').substring(0, 200) + ((d.overview || '').length > 200 ? '...' : '');
@@ -710,7 +734,7 @@ async function showTMDBDetail(tmdbId, mediaType) {
 
 function popupDiaryLogModal(tmdbId, mediaType, title, posterPath) {
   const today = new Date().toISOString().substring(0, 10);
-  const poster = posterPath ? `https://image.tmdb.org/t/p/w185${posterPath}` : '';
+  const poster = TMDB.poster(posterPath, 'w185');
   const isM = mediaType === 'movie';
   const st = isM ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
   const sOpts = !isM && st ? (st.seasons||[]).map(s => `<option value="${s.seasonNumber}">S${s.seasonNumber}</option>`).join('') : '';

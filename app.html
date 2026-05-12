@@ -86,10 +86,16 @@
           <button class="type-btn" data-type="movie">Movies</button>
           <button class="type-btn" data-type="tv">TV Shows</button>
         </div>
-        <div class="view-toggles">
-          <button class="view-btn active" data-grid="poster" title="Poster Grid">&#9638;</button>
-          <button class="view-btn" data-grid="card" title="Card View">&#9776;</button>
-          <button class="view-btn" data-grid="table" title="Table View">&#9783;</button>
+        <div class="list-sub-right">
+          <div class="list-search-wrap" id="listSearchWrap">
+            <button class="list-search-icon" id="listSearchToggle" title="Search your list">&#8981;</button>
+            <input type="text" id="listSearchInput" placeholder="Filter your list..." autocomplete="off">
+          </div>
+          <div class="view-toggles">
+            <button class="view-btn active" data-grid="poster" title="Poster Grid">&#9638;</button>
+            <button class="view-btn" data-grid="card" title="Card View">&#9776;</button>
+            <button class="view-btn" data-grid="table" title="Table View">&#9783;</button>
+          </div>
         </div>
       </div>
       <div id="listContainer"></div>
@@ -100,6 +106,8 @@
     </section>
 
     <section id="page-detail" class="page detail-page"></section>
+
+    <button id="scrollTopBtn" class="scroll-top-btn hidden" title="Back to top">&#9650;</button>
   </main>
 
   <!-- SETTINGS MODAL -->

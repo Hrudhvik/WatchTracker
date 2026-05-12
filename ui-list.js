@@ -1,7 +1,7 @@
 /* Unified Watchlist — Poster Grid | Compact | Table */
 
 const ListUI = {
-  _statusFilter: 'all', _typeFilter: 'all', _sortBy: 'dateAdded', _viewMode: 'poster',
+  _statusFilter: 'all', _typeFilter: 'all', _sortBy: 'dateAdded', _viewMode: 'poster', _searchQuery: '',
 
   init() {
     // Restore saved filter state
@@ -91,6 +91,7 @@ const ListUI = {
     let items = Store.getAll();
     if (this._statusFilter !== 'all') items = items.filter(i => i.watchStatus === this._statusFilter);
     if (this._typeFilter !== 'all') items = items.filter(i => i.mediaType === this._typeFilter);
+    if (this._searchQuery) items = items.filter(i => (i.title || '').toLowerCase().includes(this._searchQuery));
     switch (this._sortBy) {
       case 'title': items.sort((a, b) => a.title.localeCompare(b.title)); break;
       case 'year': items.sort((a, b) => (b.year || 0) - (a.year || 0)); break;
@@ -116,17 +117,68 @@ const ListUI = {
       else { const sp = document.createElement('span'); sp.className = 'tab-count'; sp.textContent = c; tab.appendChild(sp); }
     });
 
-    if (!items.length) { container.innerHTML = ''; empty.classList.add('visible'); return; }
+    if (!items.length) { container.innerHTML = ''; empty.classList.add('visible'); this._hideAlphaRail(); return; }
     empty.classList.remove('visible');
 
     if (this._viewMode === 'poster') this._renderPoster(container, items);
     else if (this._viewMode === 'card') this._renderCard(container, items);
     else this._renderTable(container, items);
+
+    // Show/hide alphabet rail based on sort mode
+    if (this._sortBy === 'title' && items.length > 15) {
+      this._showAlphaRail(items);
+    } else {
+      this._hideAlphaRail();
+    }
+  },
+
+  _showAlphaRail(items) {
+    let rail = document.getElementById('alphaRail');
+    if (!rail) {
+      rail = document.createElement('div');
+      rail.id = 'alphaRail';
+      rail.className = 'alpha-rail';
+      document.getElementById('page-watchlist').appendChild(rail);
+    }
+    // Determine which letters have items
+    const lettersPresent = new Set();
+    items.forEach(i => {
+      const first = (i.title || '')[0]?.toUpperCase() || '#';
+      lettersPresent.add(/[A-Z]/.test(first) ? first : '#');
+    });
+    const allLetters = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    rail.innerHTML = allLetters.map(l =>
+      `<div class="alpha-letter ${lettersPresent.has(l) ? 'has-items' : ''}" data-letter="${l}">${l}</div>`
+    ).join('');
+    rail.classList.add('visible');
+    rail.querySelectorAll('.alpha-letter.has-items').forEach(el => {
+      el.addEventListener('click', () => {
+        const letter = el.dataset.letter;
+        const target = document.querySelector(`[data-alpha="${letter}"]`);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    });
+  },
+
+  _hideAlphaRail() {
+    const rail = document.getElementById('alphaRail');
+    if (rail) rail.classList.remove('visible');
+  },
+
+  _getLetterAttr(title, prevTitle) {
+    const cur = (title || '')[0]?.toUpperCase() || '#';
+    const letter = /[A-Z]/.test(cur) ? cur : '#';
+    const prev = prevTitle ? ((prevTitle || '')[0]?.toUpperCase() || '#') : null;
+    const prevLetter = prev ? (/[A-Z]/.test(prev) ? prev : '#') : null;
+    if (letter !== prevLetter) return ` data-alpha="${letter}"`;
+    return '';
   },
 
   _renderPoster(c, items) {
     const sl = { watching: 'Watching', plan_to_watch: 'Plan to Watch', completed: 'Completed', on_hold: 'On Hold', dropped: 'Dropped' };
-    c.innerHTML = `<div class="content-grid">${items.map(m => {
+    c.innerHTML = `<div class="content-grid">${items.map((m, idx) => {
       const poster = TMDB.poster(m.posterPath, 'w342');
       const ph = m.mediaType === 'movie' ? 'MOV' : 'TV';
       const posterHtml = poster ? `<img src="${poster}" loading="lazy" class="poster-img">` : `<div class="no-poster-ph">${ph}</div>`;
@@ -134,7 +186,8 @@ const ListUI = {
         const w = s.episodesWatched||0, t = s.episodeCount||0;
         return `<div class="season-pip ${w>=t&&t>0?'pip-done':w>0?'pip-active':''}"></div>`;
       }).join('')}</div>` : '';
-      return `<div class="grid-card" data-tmdb="${m.tmdbId}" data-type="${m.mediaType}">
+      const alphaAttr = this._getLetterAttr(m.title, idx > 0 ? items[idx-1].title : null);
+      return `<div class="grid-card"${alphaAttr} data-tmdb="${m.tmdbId}" data-type="${m.mediaType}">
         <div class="poster-wrap">${posterHtml}<div class="poster-overlay"></div>
           <div class="poster-badge badge-${m.watchStatus}">${sl[m.watchStatus]}</div>
           <div class="poster-type-tag">${m.mediaType==='movie'?'Movie':'TV'}</div>
@@ -155,7 +208,7 @@ const ListUI = {
   _renderCard(c, items) {
     const sl = { watching: 'Watching', plan_to_watch: 'Plan to Watch', completed: 'Completed', on_hold: 'On Hold', dropped: 'Dropped' };
     const sc = { watching:'var(--watching)', completed:'var(--completed)', on_hold:'var(--on-hold)', dropped:'var(--dropped)', plan_to_watch:'var(--plan)' };
-    c.innerHTML = `<div class="card-list">${items.map(m => {
+    c.innerHTML = `<div class="card-list">${items.map((m, idx) => {
       const poster = TMDB.poster(m.posterPath, 'w185');
       const ph = m.mediaType === 'movie' ? 'MOV' : 'TV';
       const score = m.voteAverage ? m.voteAverage.toFixed(1) : '';
@@ -172,7 +225,8 @@ const ListUI = {
       } else {
         progHtml = m.watchStatus === 'completed' ? '<div class="card-progress"><div class="card-progress-bar"><div class="card-progress-fill" style="width:100%;background:var(--completed)"></div></div></div>' : '';
       }
-      return `<div class="card-row" data-tmdb="${m.tmdbId}" data-type="${m.mediaType}">
+      const alphaAttr = this._getLetterAttr(m.title, idx > 0 ? items[idx-1].title : null);
+      return `<div class="card-row"${alphaAttr} data-tmdb="${m.tmdbId}" data-type="${m.mediaType}">
         <div class="card-poster">${poster?`<img src="${poster}" loading="lazy">`:`<div class="no-poster-ph" style="width:100%;height:100%;font-size:11px;border-radius:6px;">${ph}</div>`}</div>
         <div class="card-body">
           <div class="card-header">
@@ -200,7 +254,8 @@ const ListUI = {
         const poster = TMDB.poster(m.posterPath, 'w92');
         const ph = m.mediaType === 'movie' ? 'MOV' : 'TV';
         const prog = m.mediaType === 'tv' ? this._tvProgShort(m) : (m.watchStatus==='completed'?'Done':'—');
-        return `<div class="table-row" data-tmdb="${m.tmdbId}" data-type="${m.mediaType}">
+        const alphaAttr = this._getLetterAttr(m.title, i > 0 ? items[i-1].title : null);
+        return `<div class="table-row"${alphaAttr} data-tmdb="${m.tmdbId}" data-type="${m.mediaType}">
           <span class="td-num">${i+1}</span>
           <span class="td-img">${poster?`<img src="${poster}">`:`<div class="no-poster-ph" style="width:36px;height:52px;font-size:9px;border-radius:4px;">${ph}</div>`}</span>
           <span class="td-title"><div class="td-title-name">${esc(m.title)}</div><div class="td-title-sub">${m.year||''}</div></span>
