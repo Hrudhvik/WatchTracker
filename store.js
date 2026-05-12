@@ -234,6 +234,52 @@ const Store = {
       else this.updateTvShow(survivorId, { watchStatus: duplicate.watchStatus });
     }
 
+    // Transfer season data if survivor has none but duplicate does (TV shows)
+    if (survivorType === 'tv') {
+      const sSeasons = survivor.seasons || [];
+      const dSeasons = duplicate.seasons || [];
+      if (sSeasons.length === 0 && dSeasons.length > 0) {
+        this.updateTvShow(survivorId, { seasons: dSeasons });
+      } else if (sSeasons.length > 0 && dSeasons.length > 0) {
+        // Merge: keep survivor's season structure but take higher episode counts
+        const merged = sSeasons.map(ss => {
+          const ds = dSeasons.find(d => d.seasonNumber === ss.seasonNumber);
+          if (ds && (ds.episodesWatched || 0) > (ss.episodesWatched || 0)) {
+            return { ...ss, episodesWatched: ds.episodesWatched };
+          }
+          return ss;
+        });
+        this.updateTvShow(survivorId, { seasons: merged });
+      }
+      // Transfer totalSeasons/totalEpisodes if survivor lacks them
+      if (!survivor.totalSeasons && duplicate.totalSeasons) {
+        this.updateTvShow(survivorId, { totalSeasons: duplicate.totalSeasons });
+      }
+      if (!survivor.totalEpisodes && duplicate.totalEpisodes) {
+        this.updateTvShow(survivorId, { totalEpisodes: duplicate.totalEpisodes });
+      }
+    }
+
+    // Transfer rewatchCount if duplicate has more
+    if ((duplicate.rewatchCount || 0) > (survivor.rewatchCount || 0)) {
+      const rwUpdates = { rewatchCount: duplicate.rewatchCount };
+      if (duplicate.rewatchHistory && duplicate.rewatchHistory.length) {
+        rwUpdates.rewatchHistory = [...(survivor.rewatchHistory || []), ...duplicate.rewatchHistory];
+      }
+      if (survivorType === 'movie') this.updateMovie(survivorId, rwUpdates);
+      else this.updateTvShow(survivorId, rwUpdates);
+    }
+
+    // Transfer dates if survivor has none
+    if (!survivor.startDate && duplicate.startDate) {
+      if (survivorType === 'movie') this.updateMovie(survivorId, { startDate: duplicate.startDate });
+      else this.updateTvShow(survivorId, { startDate: duplicate.startDate });
+    }
+    if (!survivor.endDate && duplicate.endDate) {
+      if (survivorType === 'movie') this.updateMovie(survivorId, { endDate: duplicate.endDate });
+      else this.updateTvShow(survivorId, { endDate: duplicate.endDate });
+    }
+
     // Migrate diary entries
     let diaryChanged = false;
     this._data.diary.forEach(d => {

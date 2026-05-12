@@ -95,7 +95,28 @@ const DetailUI = {
     const creators = !isM ? (d.created_by || []).map(c => c.name) : [];
     const networks = !isM ? (d.networks || []).slice(0, 4) : [];
     const epRt = !isM ? ((d.episode_run_time || [])[0] || '') : '';
-    const tmdbS = !isM ? (d.seasons || []).filter(s => s.season_number > 0) : [];
+    let tmdbS = !isM ? (d.seasons || []).filter(s => s.season_number > 0) : [];
+    
+    // For MAL-only entries without seasons, create a single "season" row
+    if (!isM && tmdbId < 0 && tmdbS.length === 0 && (d.number_of_episodes > 0 || stored?.totalEpisodes > 0)) {
+      const epCount = d.number_of_episodes || stored.totalEpisodes || 0;
+      tmdbS = [{
+        season_number: 1,
+        episode_count: epCount,
+        poster_path: d.poster_path || stored?.posterPath,
+        name: 'Anime Series'
+      }];
+      // Auto-initialize the store if it's missing the season structure
+      if (stored && (!stored.seasons || stored.seasons.length === 0)) {
+        stored.seasons = [{
+          seasonNumber: 1,
+          episodeCount: epCount,
+          episodesWatched: stored.episodesWatched || 0,
+          rewatchCount: stored.rewatchCount || 0
+        }];
+        Store.updateTvShow(tmdbId, { seasons: stored.seasons });
+      }
+    }
 
     const ws = stored?.watchStatus || 'plan_to_watch';
     const rwc = stored?.rewatchCount || 0;
@@ -148,22 +169,23 @@ const DetailUI = {
     if (!isM && inList && tmdbS.length) {
       const sRatings = Store.getSeasonRatings(tmdbId);
       seasonHtml = `<div class="detail-section"><h3>Season Progress</h3><div class="season-track-list" id="seasonTrackList">${tmdbS.map(s => {
-        const tr = sMap[s.season_number] || { episodesWatched: 0 };
+        const tr = sMap[s.season_number] || { episodesWatched: 0, rewatchCount: 0 };
         const w = tr.episodesWatched||0, tot = s.episode_count||0;
         const done = w>=tot&&tot>0, pct = tot>0?(w/tot)*100:0;
         const sp = TMDB.poster(s.poster_path, 'w185');
         const ay = s.air_date ? s.air_date.substring(0,4) : '';
         const sRate = sRatings[s.season_number];
+        const sRw = tr.rewatchCount || 0;
         return `<div class="season-track-card ${done?'season-done':'season-active'}" data-snum="${s.season_number}">
           ${sp?`<img class="season-poster" src="${sp}" loading="lazy">`:`<div class="season-poster no-poster-ph" style="font-size:10px;">S${s.season_number}</div>`}
-          <div class="season-info"><h4>Season ${s.season_number}${sRate?` <span class="season-user-rating">★ ${sRate}/10</span>`:''}</h4><div class="season-meta">${tot} eps${ay?' · '+ay:''}</div>
+          <div class="season-info" data-snum="${s.season_number}"><h4>Season ${s.season_number}${sRate?` <span class="season-user-rating">★ ${sRate}/10</span>`:''}${sRw > 0 ? ` <span class="season-rewatch-badge"><span class="rw-icon">↻</span>${sRw}</span>` : ''}</h4><div class="season-meta">${tot} eps${ay?' · '+ay:''}</div>
             <div class="season-progress-bar"><div class="season-progress-fill" style="width:${pct}%;background:${done?'var(--watching)':'var(--accent-light)'}"></div></div>
           </div>
           <div class="season-controls"><div class="ep-counter">
             <button class="ep-dec" data-snum="${s.season_number}">-</button>
             <div class="ep-counter-val">${w} / ${tot}</div>
             <button class="ep-inc" data-snum="${s.season_number}">+</button>
-          </div><div class="season-btn-col"><button class="season-done-btn ${done?'undone':'mark-done'}" data-snum="${s.season_number}">${done?'Undo':'Done'}</button><button class="season-diary-btn" data-snum="${s.season_number}" title="Log to diary">Log</button></div></div>
+          </div><div class="season-btn-col"><button class="season-done-btn ${done?'undone':'mark-done'}" data-snum="${s.season_number}">${done?'Undo':'Done'}</button><button class="season-diary-btn" data-snum="${s.season_number}" title="Log to diary">Log</button><button class="season-rw-btn" data-snum="${s.season_number}" title="Rewatch this season">↻ Rw${sRw > 0 ? ' '+sRw : ''}</button></div></div>
         </div>`;
       }).join('')}</div></div>`;
     }
@@ -315,6 +337,31 @@ const DetailUI = {
       page.querySelectorAll('.season-diary-btn').forEach(btn => {
         btn.addEventListener('click', e => { e.stopPropagation(); this._diaryLogModal(tmdbId,'tv',title,stored?.posterPath,parseInt(btn.dataset.snum)); });
       });
+      // Season info modal — click on season-info area (not buttons)
+      page.querySelectorAll('.season-info[data-snum]').forEach(info => {
+        info.addEventListener('click', e => {
+          e.stopPropagation();
+          const sn = parseInt(info.dataset.snum);
+          const tmdbSeason = tmdbS.find(s => s.season_number === sn);
+          this._seasonInfoModal(tmdbId, sn, tmdbSeason, stored);
+        });
+      });
+      // Season rewatch buttons
+      page.querySelectorAll('.season-rw-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          const sn = parseInt(btn.dataset.snum);
+          const show = Store.getTvShow(tmdbId); if (!show) return;
+          const ss = show.seasons || [];
+          const si = ss.findIndex(s => s.seasonNumber === sn); if (si === -1) return;
+          const s = ss[si];
+          s.rewatchCount = (s.rewatchCount || 0) + 1;
+          s.episodesWatched = 0; // Reset progress for rewatch
+          Store.updateTvShow(tmdbId, { seasons: ss });
+          toast(`Season ${sn} rewatch #${s.rewatchCount} started`);
+          this.open(tmdbId, 'tv'); // Refresh
+        });
+      });
     }
 
     page.querySelectorAll('.detail-body [data-tmdb]').forEach(c => c.addEventListener('click', () => this.open(parseInt(c.dataset.tmdb), c.dataset.type)));
@@ -333,8 +380,10 @@ const DetailUI = {
 
   _manualSyncModal(tmdbId, mediaType, stored) {
     const isM = mediaType === 'movie';
+    const hasTmdb = tmdbId > 0;
+    const hasMal = stored && stored.malId;
     const html = `<div class="modal-backdrop edit-modal-backdrop" id="manualSyncModal">
-      <div class="modal-box edit-modal-box" style="max-width:400px;">
+      <div class="modal-box edit-modal-box" style="max-width:420px;">
         <div class="modal-header"><h2>Link & Sync</h2><button class="modal-close-btn" id="msClose">&#10005;</button></div>
         <div class="modal-body">
           <p class="field-hint" style="margin-bottom:12px;">Paste a TMDB or MyAnimeList URL to link and fetch updated details, or toggle the media type below.</p>
@@ -349,6 +398,24 @@ const DetailUI = {
           <div class="btn-row" style="margin-top:16px;">
             <button id="msSyncBtn" class="btn-accent" style="flex:1;">Sync</button>
           </div>
+          ${stored ? `<hr style="margin:16px 0;border-color:var(--border);">
+          <div class="edit-field-label" style="margin-bottom:8px;">Current Links</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;">
+              <div style="font-size:12px;">
+                <span style="color:var(--text-2);font-weight:600;">TMDB:</span>
+                <span style="color:${hasTmdb?'var(--text-0)':'var(--text-3)'};">${hasTmdb ? '#'+tmdbId : 'Not linked'}</span>
+              </div>
+              ${hasTmdb ? '<button class="unlink-btn" id="msUnlinkTmdb">Unlink</button>' : ''}
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;">
+              <div style="font-size:12px;">
+                <span style="color:var(--text-2);font-weight:600;">MAL:</span>
+                <span style="color:${hasMal?'var(--text-0)':'var(--text-3)'};">${hasMal ? '#'+stored.malId : 'Not linked'}</span>
+              </div>
+              ${hasMal ? '<button class="unlink-btn" id="msUnlinkMal">Unlink</button>' : ''}
+            </div>
+          </div>` : ''}
         </div>
       </div>
     </div>`;
@@ -357,6 +424,35 @@ const DetailUI = {
     const close = () => m.remove();
     m.querySelector('#msClose').addEventListener('click', close);
     m.addEventListener('click', e => { if (e.target === m) close(); });
+
+    // Unlink TMDB handler
+    const unlinkTmdbBtn = m.querySelector('#msUnlinkTmdb');
+    if (unlinkTmdbBtn) {
+      unlinkTmdbBtn.addEventListener('click', () => {
+        if (!confirm('Unlink TMDB? The entry will keep its data but TMDB will no longer be used for details.')) return;
+        const newId = -(stored._id || Date.now());
+        Store.migrateTmdbId(tmdbId, newId, mediaType);
+        if (isM) Store.updateMovie(newId, { _tmdbUnlinked: true });
+        else Store.updateTvShow(newId, { _tmdbUnlinked: true });
+        toast('TMDB unlinked');
+        close();
+        if (typeof ListUI !== 'undefined') ListUI.render();
+        this.open(newId, mediaType);
+      });
+    }
+
+    // Unlink MAL handler
+    const unlinkMalBtn = m.querySelector('#msUnlinkMal');
+    if (unlinkMalBtn) {
+      unlinkMalBtn.addEventListener('click', () => {
+        if (!confirm('Unlink MAL? The MAL ID will be removed from this entry.')) return;
+        if (isM) Store.updateMovie(tmdbId, { malId: null, sourceTag: stored.sourceTag === 'anime' ? null : stored.sourceTag });
+        else Store.updateTvShow(tmdbId, { malId: null, sourceTag: stored.sourceTag === 'anime' ? null : stored.sourceTag });
+        toast('MAL unlinked');
+        close();
+        this.open(tmdbId, mediaType);
+      });
+    }
 
     m.querySelector('#msSyncBtn').addEventListener('click', async () => {
       const url = m.querySelector('#msUrl').value.trim();
@@ -414,8 +510,22 @@ const DetailUI = {
             });
           } else {
             const d = await TMDB.tvDetails(newTmdbId);
+            const ss = (d.seasons || []).filter(s => s.season_number > 0);
+            const existing = Store.getTvShow(newTmdbId);
+            const existingSeasons = existing?.seasons || [];
+            // Build season data, preserving existing watch progress
+            const seasonData = ss.map(s => {
+              const prev = existingSeasons.find(es => es.seasonNumber === s.season_number);
+              return {
+                seasonNumber: s.season_number,
+                episodeCount: s.episode_count || 0,
+                episodesWatched: prev ? prev.episodesWatched || 0 : 0,
+                posterPath: s.poster_path,
+                rewatchCount: prev ? prev.rewatchCount || 0 : 0,
+              };
+            });
             Store.updateTvShow(newTmdbId, {
-              title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.first_air_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: (d.genres || []).map(g => g.name)
+              title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.first_air_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: (d.genres || []).map(g => g.name), seasons: seasonData
             });
           }
         }
@@ -789,5 +899,79 @@ const DetailUI = {
         ListUI.render();
       }
     });
+  },
+
+  // Season info modal — shows overview, air date, and episode list from TMDB
+  async _seasonInfoModal(tmdbId, seasonNumber, tmdbSeasonBasic, stored) {
+    const isAnime = stored && stored.sourceTag === 'anime';
+    const posterUrl = tmdbSeasonBasic ? TMDB.poster(tmdbSeasonBasic.poster_path, 'w342') : null;
+    const seasonName = tmdbSeasonBasic ? tmdbSeasonBasic.name : `Season ${seasonNumber}`;
+    const epCount = tmdbSeasonBasic ? tmdbSeasonBasic.episode_count : 0;
+    const airDate = tmdbSeasonBasic ? tmdbSeasonBasic.air_date : '';
+
+    // Show loading modal immediately
+    const loadingHtml = `<div class="modal-backdrop edit-modal-backdrop season-info-modal" id="seasonInfoModal">
+      <div class="modal-box edit-modal-box" style="max-width:560px;">
+        <div class="modal-header"><h2>${esc(seasonName)}</h2><button class="modal-close-btn" id="siClose">&#10005;</button></div>
+        <div class="modal-body">
+          <div style="padding:32px;text-align:center;color:var(--text-3);">Loading season details...</div>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', loadingHtml);
+    const modal = document.getElementById('seasonInfoModal');
+    const close = () => modal.remove();
+    modal.querySelector('#siClose').addEventListener('click', close);
+    modal.addEventListener('click', e => { if (e.target === modal) close(); });
+
+    // Fetch full season details from TMDB (only for positive TMDB IDs)
+    let seasonData = null;
+    if (tmdbId > 0) {
+      try {
+        seasonData = await TMDB.seasonDetails(tmdbId, seasonNumber);
+      } catch (e) { /* will show basic info only */ }
+    }
+
+    const overview = seasonData?.overview || '';
+    const episodes = seasonData?.episodes || [];
+    const fullAirDate = seasonData?.air_date || airDate || '';
+
+    const sMapEntry = (stored?.seasons || []).find(s => s.seasonNumber === seasonNumber) || {};
+    const watched = sMapEntry.episodesWatched || 0;
+    const rwCount = sMapEntry.rewatchCount || 0;
+
+    const body = modal.querySelector('.modal-body');
+    body.innerHTML = `
+      ${isAnime ? `<div class="season-note-banner">&#9432; MAL tracks each anime season as a separate entry, while TMDB groups them under one show. Season data shown here is from TMDB.</div>` : ''}
+      <div class="season-info-header">
+        ${posterUrl ? `<div class="season-info-poster"><img src="${posterUrl}"></div>` : ''}
+        <div class="season-info-meta">
+          <h3>${esc(seasonData?.name || seasonName)}</h3>
+          <div class="season-info-meta-row">${epCount} episodes${fullAirDate ? ' · First aired: ' + fullAirDate : ''}</div>
+          <div class="season-info-meta-row">Progress: ${watched} / ${epCount} watched${rwCount > 0 ? ` · Rewatched ${rwCount}x` : ''}</div>
+          ${(() => {
+            const sRatings = Store.getSeasonRatings(tmdbId);
+            const sRate = sRatings[seasonNumber];
+            return sRate ? `<div class="season-info-meta-row" style="color:var(--accent-light);font-weight:600;">★ ${sRate}/10</div>` : '';
+          })()}
+        </div>
+      </div>
+      ${overview ? `<div class="season-info-overview">${esc(overview)}</div>` : ''}
+      ${episodes.length ? `
+        <h4 style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--text-1);">Episodes</h4>
+        <div class="season-ep-list">${episodes.map(ep => {
+          const still = ep.still_path ? TMDB.poster(ep.still_path, 'w185') : null;
+          const epAir = ep.air_date || '';
+          return `<div class="season-ep-item">
+            ${still ? `<img class="season-ep-still" src="${still}" loading="lazy">` : `<div class="season-ep-still" style="display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:10px;">E${ep.episode_number}</div>`}
+            <div class="season-ep-info">
+              <div class="season-ep-num">Episode ${ep.episode_number}</div>
+              <div class="season-ep-name">${esc(ep.name || '')}</div>
+              ${epAir ? `<div class="season-ep-date">${epAir}</div>` : ''}
+            </div>
+          </div>`;
+        }).join('')}</div>
+      ` : (tmdbId <= 0 ? '<div style="color:var(--text-3);font-size:13px;text-align:center;padding:16px;">No episode data available for MAL-only entries.</div>' : '')}
+    `;
   },
 };
