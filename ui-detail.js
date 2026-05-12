@@ -64,7 +64,9 @@ const DetailUI = {
     else { if (yearRange) chips += `<span class="detail-chip">${yearRange}</span>`; chips += `<span class="detail-chip">${d.number_of_seasons||'?'} Seasons</span><span class="detail-chip">${d.number_of_episodes||'?'} Eps</span>`; }
 
     let stats = '';
-    if (d.vote_average) stats += `<div class="detail-stat"><div class="detail-stat-val gold">${d.vote_average.toFixed(1)}</div><div class="detail-stat-label">TMDB (${d.vote_count||0})</div></div>`;
+    const isAnime = stored && stored.sourceTag === 'anime';
+    const scoreLabel = isAnime ? 'MAL' : 'TMDB';
+    if (d.vote_average) stats += `<div class="detail-stat"><div class="detail-stat-val gold">${d.vote_average.toFixed(1)}</div><div class="detail-stat-label">${scoreLabel} ${d.vote_count ? `(${d.vote_count})` : ''}</div></div>`;
     if (inList) {
       if (isM) { const ur = Store.getUserRating(tmdbId,'movie'); if (ur) stats += `<div class="detail-stat"><div class="detail-stat-val" style="color:var(--accent-light)">★ ${ur}</div><div class="detail-stat-label">Your Rating</div></div>`; }
       else { const ar = Store.getAvgUserRating(tmdbId,'tv'); if (ar) stats += `<div class="detail-stat"><div class="detail-stat-val" style="color:var(--accent-light)">★ ${ar.toFixed(1)}</div><div class="detail-stat-label">Your Avg</div></div>`; }
@@ -147,7 +149,12 @@ const DetailUI = {
           ${d.tagline?`<div class="detail-tagline">"${esc(d.tagline)}"</div>`:''}
           <div class="detail-chips">${chips}</div>
           <div class="detail-stats">${stats}</div>
-          <div class="detail-actions">${actions}</div>${dates}
+          <div class="detail-actions" style="display:flex; gap:10px; align-items:center;">
+            ${actions}
+            <button id="detailManualSyncBtn" class="btn-ghost" style="font-size:12px; padding:2px 6px; margin-left:auto; height:auto; min-height:0;">&#128279; Link</button>
+            <a href="https://www.themoviedb.org/${isM?'movie':'tv'}/${Math.abs(tmdbId)}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">↗ TMDB</a>
+            ${stored && stored.malId ? `<a href="https://myanimelist.net/anime/${stored.malId}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">↗ MAL</a>` : ''}
+          </div>${dates}
         </div>
       </div>
       <div class="detail-body">
@@ -205,6 +212,9 @@ const DetailUI = {
     if (eBtn) eBtn.addEventListener('click', () => this._editModal(tmdbId, mediaType, title, d));
     const dBtn = page.querySelector('#detailDiaryBtn');
     if (dBtn) dBtn.addEventListener('click', () => this._diaryLogModal(tmdbId, mediaType, title, stored?.posterPath, null));
+    const msBtn = page.querySelector('#detailManualSyncBtn');
+    if (msBtn) msBtn.addEventListener('click', () => this._manualSyncModal(tmdbId, mediaType, stored));
+
     if (!isM && inList) {
       this._bindSeason(page, tmdbId, tmdbS);
       page.querySelectorAll('.season-diary-btn').forEach(btn => {
@@ -223,6 +233,84 @@ const DetailUI = {
         ph.textContent = isM ? 'MOV' : 'TV';
         img.replaceWith(ph);
       });
+    });
+  },
+
+  _manualSyncModal(tmdbId, mediaType, stored) {
+    const isM = mediaType === 'movie';
+    const html = `<div class="modal-backdrop edit-modal-backdrop" id="manualSyncModal">
+      <div class="modal-box edit-modal-box" style="max-width:400px;">
+        <div class="modal-header"><h2>Link & Sync</h2><button class="modal-close-btn" id="msClose">&#10005;</button></div>
+        <div class="modal-body">
+          <p class="field-hint" style="margin-bottom:12px;">Paste a TMDB or MyAnimeList URL to link and fetch updated details.</p>
+          <div class="input-row"><input type="text" id="msUrl" placeholder="https://..." class="sync-input"></div>
+          <div class="btn-row" style="margin-top:16px;">
+            <button id="msSyncBtn" class="btn-accent" style="flex:1;">Sync</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    const m = document.getElementById('manualSyncModal');
+    const close = () => m.remove();
+    m.querySelector('#msClose').addEventListener('click', close);
+    m.addEventListener('click', e => { if (e.target === m) close(); });
+
+    m.querySelector('#msSyncBtn').addEventListener('click', async () => {
+      const url = m.querySelector('#msUrl').value.trim();
+      if (!url) return toast('Please enter a URL');
+
+      const btn = m.querySelector('#msSyncBtn');
+      btn.textContent = 'Syncing...';
+      btn.disabled = true;
+
+      try {
+        let newTmdbId = tmdbId;
+        let malId = stored ? stored.malId : null;
+        let requireTmdbUpdate = false;
+        let requireMalUpdate = false;
+
+        if (url.includes('myanimelist.net/anime/')) {
+          const match = url.match(/anime\/(\d+)/);
+          if (match) {
+            malId = parseInt(match[1]);
+            requireMalUpdate = true;
+          }
+        } else if (url.includes('themoviedb.org/')) {
+          const match = url.match(/(movie|tv)\/(\d+)/);
+          if (match) {
+            const parsedType = match[1];
+            if (parsedType !== mediaType) throw new Error(`Type mismatch: URL is ${parsedType}, current is ${mediaType}`);
+            newTmdbId = parseInt(match[2]);
+            requireTmdbUpdate = true;
+          }
+        } else {
+          throw new Error('Unsupported URL. Use TMDB or MAL links.');
+        }
+
+        if (requireTmdbUpdate && newTmdbId !== tmdbId && stored) {
+          Store.migrateTmdbId(tmdbId, newTmdbId, mediaType);
+        }
+
+        if (requireMalUpdate && stored) {
+          if (isM) Store.updateMovie(newTmdbId, { malId });
+          else Store.updateTvShow(newTmdbId, { malId });
+          // Fetch Jikan info to update poster/details immediately
+          const jikan = await SyncEngine._fetchJikanInfo(malId);
+          if (jikan && jikan.poster) {
+            if (isM) Store.updateMovie(newTmdbId, { posterPath: jikan.poster });
+            else Store.updateTvShow(newTmdbId, { posterPath: jikan.poster });
+          }
+        }
+
+        toast('Linked and synced successfully!');
+        close();
+        this.open(newTmdbId, mediaType);
+      } catch (err) {
+        toast('Error: ' + err.message);
+        btn.textContent = 'Sync';
+        btn.disabled = false;
+      }
     });
   },
 

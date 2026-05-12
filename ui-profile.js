@@ -16,9 +16,15 @@ const ProfileUI = {
     const tRw=tvshows.reduce((s,t)=>s+(t.rewatchCount||0),0);
     const tEps=tvshows.reduce((s,t)=>s+(t.seasons||[]).reduce((se,ss)=>se+(ss.episodesWatched||0),0),0);
 
-    const recent = [...movies.map(m=>({...m,mediaType:'movie'})),...tvshows.map(t=>({...t,mediaType:'tv'}))]
-      .filter(item => item.watchStatus === 'completed')
-      .sort((a,b)=>new Date(b.endDate||b.dateUpdated||b.dateAdded)-new Date(a.endDate||a.dateUpdated||a.dateAdded)).slice(0,8);
+    const diary = Store.getDiary();
+    const recent = diary
+      .filter(d => ['watched', 'rewatch'].includes(d.action))
+      .sort((a,b) => new Date(b.date || b.timestamp) - new Date(a.date || a.timestamp))
+      .slice(0, 8)
+      .map(d => {
+         const m = d.type === 'movie' ? movies.find(x => x.tmdbId === d.tmdbId) : tvshows.find(x => x.tmdbId === d.tmdbId);
+         return { tmdbId: d.tmdbId, mediaType: d.type, title: d.title, posterPath: d.posterPath || (m ? m.posterPath : null), year: m ? m.year : '' };
+      });
     const acts = activity.slice(0,10);
     const sl = {watching:'Watching',plan_to_watch:'Plan to Watch',completed:'Completed',on_hold:'On Hold',dropped:'Dropped'};
 

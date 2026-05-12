@@ -6,6 +6,7 @@
   "permissions": ["storage", "alarms", "identity"],
   "host_permissions": [
     "https://letterboxd.com/*",
+    "https://boxd.it/*",
     "https://api.jikan.moe/*",
     "https://api.myanimelist.net/*",
     "https://myanimelist.net/*",

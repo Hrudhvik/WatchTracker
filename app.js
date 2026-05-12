@@ -61,6 +61,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (!key) document.getElementById('settingsModal').classList.remove('hidden');
 
+
   // ─── Sidebar Nav ───
   document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -180,6 +181,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     inp.type = inp.type === 'password' ? 'text' : 'password';
   });
 
+  document.getElementById('toggleMalKeyVis').addEventListener('click', () => {
+    const inp = document.getElementById('malClientId');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  });
+
   document.getElementById('exportBtn').addEventListener('click', () => {
     const blob = new Blob([Store.exportAll()], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -227,6 +233,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     reader.readAsText(file); e.target.value = '';
   });
+
 
   // ═══════════════════════════════════════════
   // IMPORT / SYNC TASK QUEUE — one job at a time
@@ -306,31 +313,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ─── Letterboxd CSV/ZIP Import ───
   document.getElementById('importLetterboxdBtn').addEventListener('click', () => document.getElementById('importLbCsvFile').click());
   document.getElementById('importLbCsvFile').addEventListener('change', async (e) => {
-    const file = e.target.files[0]; if (!file) return;
+    const files = Array.from(e.target.files); if (!files.length) return;
     e.target.value = '';
     if (!TMDB.getKey()) { toast('Set your TMDB API key first'); return; }
 
     await enqueueTask('Importing Letterboxd', async () => {
-      let entries;
-      updateSyncProgress(2, 'Reading file...');
-      if (file.name.endsWith('.zip')) {
-        entries = await ImportExport.parseLetterboxdZip(file);
-      } else {
-        const text = await file.text();
-        entries = ImportExport.parseLetterboxdCSV(text);
+      try {
+        await ImportExport.processLetterboxdFiles(files, (c, t, msg) => {
+          updateSyncProgress(Math.floor((c / t) * 100), msg);
+        });
+        toast('Letterboxd import complete!');
+      } catch (err) {
+        toast('Letterboxd import failed: ' + err.message);
       }
-      if (!entries.length) { toast('No entries found'); return; }
-      updateSyncProgress(5, `Parsed ${entries.length} entries. Matching to TMDB...`);
-      const { results, matched } = await SyncEngine.matchToTmdb(entries, (i, t, title) => {
-        updateSyncProgress(5 + (i / t * 70), `Matching: ${title} (${i}/${t})`);
-      });
-      // Save state so apply can resume if tab is closed
-      SyncEngine.saveImportState('Letterboxd', results, 'merge');
-      updateSyncProgress(75, `Matched ${matched}/${entries.length}. Applying to library...`);
-      const stats = await SyncEngine.applySyncResults(results, 'merge', (i, t, title) => {
-        updateSyncProgress(75 + (i / t * 25), `Adding: ${title} (${i}/${t})`);
-      });
-      toast(`Letterboxd: +${stats.added} added, ${stats.updated} updated, ${stats.diaryAdded} diary, ${stats.skipped} skipped`);
     });
   });
 

@@ -164,11 +164,11 @@
                 <input type="file" id="bgImageFile" accept="image/*" hidden>
               </div>
               <div class="slider-row">
-                <span class="ct-label">Overlay</span>
+                <span class="ct-label" style="display:inline-block; width:50px;">Overlay</span>
                 <input type="range" id="bgOverlayOpacity" min="0" max="95" value="70" class="ct-range">
               </div>
               <div class="slider-row">
-                <span class="ct-label">Blur</span>
+                <span class="ct-label" style="display:inline-block; width:50px;">Blur</span>
                 <input type="range" id="bgBlur" min="0" max="30" value="0" class="ct-range">
               </div>
             </div>
@@ -210,12 +210,13 @@
               <div class="btn-row" style="flex-wrap:wrap;gap:6px;margin-top:8px;">
                 <button id="importBtn" class="btn-ghost">WatchTracker JSON</button>
                 <button id="importLetterboxdBtn" class="btn-ghost">Letterboxd ZIP / CSV</button>
-                <button id="importMalXmlBtn" class="btn-ghost">MAL XML Export</button>
+                <button id="importMalXmlBtn" class="btn-ghost">MAL XML Import</button>
               </div>
               <input type="file" id="importFile" accept=".json" hidden>
-              <input type="file" id="importLbCsvFile" accept=".zip,.csv" hidden>
+              <input type="file" id="importLbCsvFile" accept=".csv" multiple hidden>
               <input type="file" id="importMalXmlFile" accept=".xml,.gz" hidden>
             </div>
+
 
             <!-- Danger Zone -->
             <div class="ct-section" style="margin-top:18px;">
@@ -257,7 +258,8 @@
               </div>
               <p class="field-hint" style="margin:6px 0 4px;">Get a free Client ID at <a href="https://myanimelist.net/apiconfig" target="_blank">myanimelist.net/apiconfig</a>. Set App Type to "other", redirect URI to <code id="malRedirectUri" style="font-size:10px;user-select:all;"></code></p>
               <div class="input-row" style="margin-top:6px;">
-                <input type="text" id="malClientId" placeholder="MAL Client ID" class="sync-input">
+                <input type="password" id="malClientId" placeholder="MAL Client ID" class="sync-input">
+                <button id="toggleMalKeyVis" class="icon-btn-sm">&#9673;</button>
               </div>
               <div class="btn-row" style="margin-top:8px;">
                 <button id="malLoginBtn" class="btn-ghost btn-sync">Login with MAL</button>

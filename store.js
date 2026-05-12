@@ -128,6 +128,22 @@ const Store = {
   getPopupPrefs() { return this._data.popupPrefs; },
   setPopupPrefs(p) { this._data.popupPrefs = p; chrome.storage.local.set({ popupPrefs: p }); },
 
+  migrateTmdbId(oldId, newId, type) {
+    if (type === 'movie') {
+      const idx = this._data.movies.findIndex(m => m.tmdbId === oldId);
+      if (idx !== -1) { this._data.movies[idx].tmdbId = newId; this._saveMovies(); }
+    } else {
+      const idx = this._data.tvshows.findIndex(t => t.tmdbId === oldId);
+      if (idx !== -1) { this._data.tvshows[idx].tmdbId = newId; this._saveTvShows(); }
+    }
+    let diaryChanged = false;
+    this._data.diary.forEach(d => { if (d.tmdbId === oldId && d.type === type) { d.tmdbId = newId; diaryChanged = true; } });
+    if (diaryChanged) chrome.storage.local.set({ diary: this._data.diary });
+    let activityChanged = false;
+    this._data.activity.forEach(a => { if (a.tmdbId === oldId && a.type === type) { a.tmdbId = newId; activityChanged = true; } });
+    if (activityChanged) chrome.storage.local.set({ activity: this._data.activity });
+  },
+
   // ─── Export/Import ───
   exportAll() {
     return JSON.stringify({

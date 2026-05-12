@@ -488,6 +488,7 @@ function showDetail(tmdbId, mediaType) {
   const poster = stored.posterPath ? `https://image.tmdb.org/t/p/w185${stored.posterPath}` : '';
   const genres = (stored.genres || []).slice(0, 4);
   const score = stored.voteAverage ? stored.voteAverage.toFixed(1) : '—';
+  const scoreLabel = stored.sourceTag === 'anime' ? 'MAL' : 'TMDB';
 
   let seasonHtml = '';
   if (!isM) {
@@ -523,7 +524,7 @@ function showDetail(tmdbId, mediaType) {
         <div class="pd-sub">${movieInfo}</div>
         <div class="pd-genres">${genres.map(g => `<span class="pd-genre-tag">${esc(g)}</span>`).join('')}</div>
         <div class="pd-stats">
-          <div><div class="pd-stat-val gold">${score}</div><div class="pd-stat-label">TMDB</div></div>
+          <div><div class="pd-stat-val gold">${score}</div><div class="pd-stat-label">${scoreLabel}</div></div>
           ${stored.rewatchCount ? `<div><div class="pd-stat-val">${stored.rewatchCount}</div><div class="pd-stat-label">Rewatches</div></div>` : ''}
         </div>
       </div>

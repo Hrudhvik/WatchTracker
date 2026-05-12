@@ -186,7 +186,7 @@ const ListUI = {
             ${m.rewatchCount?`<span class="card-rewatch">↻ ${m.rewatchCount}</span>`:''}
           </div>
         </div>
-        ${score?`<div class="card-score-col"><span class="card-score-val">${score}</span><span class="card-score-label">TMDB</span></div>`:''}
+        ${score?`<div class="card-score-col"><span class="card-score-val">${score}</span><span class="card-score-label">${m.sourceTag === 'anime' ? 'MAL' : 'TMDB'}</span></div>`:''}
       </div>`;
     }).join('')}</div>`;
     this._bind(c);
