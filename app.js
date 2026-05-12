@@ -184,22 +184,398 @@ document.addEventListener('DOMContentLoaded', async () => {
     const blob = new Blob([Store.exportAll()], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = `watchtracker-${new Date().toISOString().slice(0, 10)}.json`; a.click();
-    toast('Exported');
+    toast('Full backup exported');
   });
 
+  document.getElementById('exportCSVBtn').addEventListener('click', () => {
+    const csv = ImportExport.exportWatchlistCSV();
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `watchtracker-watchlist-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    toast('Watchlist CSV exported');
+  });
+
+  document.getElementById('exportDiaryCSVBtn').addEventListener('click', () => {
+    const csv = ImportExport.exportDiaryCSV();
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `watchtracker-diary-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    toast('Diary CSV exported');
+  });
+
+  document.getElementById('exportLetterboxdBtn').addEventListener('click', () => {
+    const csv = ImportExport.exportLetterboxdCSV();
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `letterboxd-import-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    toast('Letterboxd-compatible CSV exported');
+  });
+
+  // ─── JSON Import ───
   document.getElementById('importBtn').addEventListener('click', () => document.getElementById('importFile').click());
   document.getElementById('importFile').addEventListener('change', (e) => {
     const file = e.target.files[0]; if (!file) return;
+    const mode = document.querySelector('input[name="importMode"]:checked')?.value || 'merge';
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const c = Store.importAll(reader.result);
+        if (mode === 'replace' && !confirm('This will replace ALL your data. Continue?')) return;
+        const c = Store.importAll(reader.result, mode);
         App.refreshCounts(); ListUI.render();
-        toast(`Imported ${c.movies} movies, ${c.tvshows} TV shows`);
-      } catch { toast('Import failed'); }
+        toast(`Imported: ${c.movies} movies, ${c.tvshows} TV shows, ${c.diary} diary entries`);
+      } catch { toast('Import failed — invalid JSON file'); }
     };
     reader.readAsText(file); e.target.value = '';
   });
+
+  // ═══════════════════════════════════════════
+  // IMPORT / SYNC TASK QUEUE — one job at a time
+  // ═══════════════════════════════════════════
+  const _taskQueue = [];
+  let _taskRunning = false;
+  const _importSyncBtns = ['importLetterboxdBtn', 'importMalXmlBtn', 'lbSyncBtn', 'malSyncBtn', 'importBtn'];
+
+  function _disableImportBtns() {
+    _importSyncBtns.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.disabled = true; el.classList.add('btn-disabled'); }
+    });
+  }
+  function _enableImportBtns() {
+    _importSyncBtns.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.disabled = false; el.classList.remove('btn-disabled'); }
+    });
+  }
+
+  async function enqueueTask(label, taskFn) {
+    if (_taskRunning) {
+      toast('Another import/sync is in progress — please wait');
+      return;
+    }
+    _taskRunning = true;
+    _disableImportBtns();
+    window.addEventListener('beforeunload', _beforeUnloadWarn);
+    showSyncProgress(label);
+    try {
+      await taskFn();
+      SyncEngine.clearImportState();
+    } catch (err) {
+      // Show the error if the task didn't already toast it
+      console.error('[WatchTracker]', label, 'failed:', err);
+    } finally {
+      hideSyncProgress();
+      _taskRunning = false;
+      _enableImportBtns();
+      window.removeEventListener('beforeunload', _beforeUnloadWarn);
+      App.refreshCounts();
+      ListUI.render();
+    }
+  }
+
+  function _beforeUnloadWarn(e) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+
+  // ─── Resume pending import if tab was closed mid-apply ───
+  (async () => {
+    const pending = await SyncEngine.getPendingImport();
+    if (pending && pending.results && pending.results.length) {
+      const age = Date.now() - new Date(pending.savedAt).getTime();
+      // Only resume if saved less than 1 hour ago
+      if (age < 60 * 60 * 1000) {
+        const doResume = confirm(`A ${pending.label} import was interrupted. Resume applying ${pending.results.length} matched entries?`);
+        if (doResume) {
+          await enqueueTask('Resuming ' + pending.label, async () => {
+            updateSyncProgress(5, `Resuming ${pending.results.length} entries...`);
+            const stats = await SyncEngine.applySyncResults(pending.results, pending.mode || 'merge', (i, t, title) => {
+              updateSyncProgress(5 + (i / t * 95), `Adding: ${title} (${i}/${t})`);
+            });
+            toast(`Resumed: +${stats.added} added, ${stats.updated} updated, ${stats.skipped} skipped`);
+          });
+        } else {
+          SyncEngine.clearImportState();
+        }
+      } else {
+        SyncEngine.clearImportState();
+      }
+    }
+  })();
+
+  // ─── Letterboxd CSV/ZIP Import ───
+  document.getElementById('importLetterboxdBtn').addEventListener('click', () => document.getElementById('importLbCsvFile').click());
+  document.getElementById('importLbCsvFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    e.target.value = '';
+    if (!TMDB.getKey()) { toast('Set your TMDB API key first'); return; }
+
+    await enqueueTask('Importing Letterboxd', async () => {
+      let entries;
+      updateSyncProgress(2, 'Reading file...');
+      if (file.name.endsWith('.zip')) {
+        entries = await ImportExport.parseLetterboxdZip(file);
+      } else {
+        const text = await file.text();
+        entries = ImportExport.parseLetterboxdCSV(text);
+      }
+      if (!entries.length) { toast('No entries found'); return; }
+      updateSyncProgress(5, `Parsed ${entries.length} entries. Matching to TMDB...`);
+      const { results, matched } = await SyncEngine.matchToTmdb(entries, (i, t, title) => {
+        updateSyncProgress(5 + (i / t * 70), `Matching: ${title} (${i}/${t})`);
+      });
+      // Save state so apply can resume if tab is closed
+      SyncEngine.saveImportState('Letterboxd', results, 'merge');
+      updateSyncProgress(75, `Matched ${matched}/${entries.length}. Applying to library...`);
+      const stats = await SyncEngine.applySyncResults(results, 'merge', (i, t, title) => {
+        updateSyncProgress(75 + (i / t * 25), `Adding: ${title} (${i}/${t})`);
+      });
+      toast(`Letterboxd: +${stats.added} added, ${stats.updated} updated, ${stats.diaryAdded} diary, ${stats.skipped} skipped`);
+    });
+  });
+
+  // ─── MAL XML Import (supports .xml and .gz) ───
+  document.getElementById('importMalXmlBtn').addEventListener('click', () => document.getElementById('importMalXmlFile').click());
+  document.getElementById('importMalXmlFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    e.target.value = '';
+    if (!TMDB.getKey()) { toast('Set your TMDB API key first'); return; }
+
+    await enqueueTask('Importing MAL', async () => {
+      updateSyncProgress(2, 'Reading file...');
+      const entries = await ImportExport.parseMalFile(file);
+      if (!entries.length) { toast('No entries found in XML'); return; }
+      const movieCount = entries.filter(e => e.type === 'movie').length;
+      const tvCount = entries.filter(e => e.type === 'tv').length;
+      updateSyncProgress(5, `Parsed ${entries.length} entries (${tvCount} TV, ${movieCount} movies). Matching...`);
+      const { results, matched } = await SyncEngine.matchToTmdb(entries, (i, t, title) => {
+        updateSyncProgress(5 + (i / t * 70), `Matching: ${title} (${i}/${t})`);
+      });
+      // Save state so apply can resume if tab is closed
+      SyncEngine.saveImportState('MAL', results, 'merge');
+      updateSyncProgress(75, `Matched ${matched}/${entries.length}. Applying to library...`);
+      const stats = await SyncEngine.applySyncResults(results, 'merge', (i, t, title) => {
+        updateSyncProgress(75 + (i / t * 25), `Adding: ${title} (${i}/${t})`);
+      });
+      toast(`MAL: +${stats.added} added, ${stats.updated} updated, ${stats.skipped} skipped`);
+    });
+  });
+
+  // ─── Clear All Data ───
+  document.getElementById('clearAllBtn').addEventListener('click', () => {
+    if (_taskRunning) { toast('Wait for the current import to finish'); return; }
+    if (!confirm('Are you sure? This will permanently delete ALL your data.')) return;
+    if (!confirm('Really? This cannot be undone.')) return;
+    Store.clearAll();
+    App.refreshCounts(); ListUI.render();
+    toast('All data cleared');
+  });
+
+  // ─── Data Management Accordion ───
+  document.getElementById('dataToggle').addEventListener('click', () => {
+    const panel = document.getElementById('dataPanel');
+    const arrow = document.getElementById('dataArrow');
+    panel.classList.toggle('open');
+    arrow.classList.toggle('open');
+  });
+
+  // ─── External Sync ───
+  document.getElementById('syncToggle').addEventListener('click', () => {
+    const panel = document.getElementById('syncPanel');
+    const arrow = document.getElementById('syncArrow');
+    panel.classList.toggle('open');
+    arrow.classList.toggle('open');
+  });
+
+  // Load sync config
+  await SyncEngine.loadConfig();
+  await MalOAuth.load();
+  const syncCfg = SyncEngine.getConfig();
+  document.getElementById('lbUsername').value = syncCfg.letterboxd || '';
+  document.getElementById('syncInterval').value = syncCfg.syncInterval || '0';
+  document.getElementById('malEnglishTitles').checked = syncCfg.malUseEnglishTitles || false;
+  document.getElementById('malClientId').value = MalOAuth.getClientId() || '';
+  document.getElementById('malRedirectUri').textContent = MalOAuth.getRedirectUri();
+  updateMalLoginState();
+  updateSyncTimestamps();
+
+  // Save usernames & interval
+  document.getElementById('saveUsernames').addEventListener('click', () => {
+    SyncEngine.setLetterboxd(document.getElementById('lbUsername').value);
+    SyncEngine.setSyncInterval(parseInt(document.getElementById('syncInterval').value) || 0);
+    toast('Sync settings saved');
+  });
+
+  // English titles checkbox
+  document.getElementById('malEnglishTitles').addEventListener('change', (e) => {
+    SyncEngine.setMalUseEnglishTitles(e.target.checked);
+  });
+
+  // Letterboxd Sync
+  document.getElementById('lbSyncBtn').addEventListener('click', async () => {
+    const username = document.getElementById('lbUsername').value.trim();
+    if (!username) { toast('Enter your Letterboxd username'); return; }
+    if (!TMDB.getKey()) { toast('Set your TMDB API key first'); return; }
+    SyncEngine.setLetterboxd(username);
+    const statusEl = document.getElementById('lbSyncStatus');
+
+    await enqueueTask('Syncing Letterboxd', async () => {
+      statusEl.textContent = 'Syncing...';
+      statusEl.className = 'sync-status syncing';
+      try {
+        updateSyncProgress(10, 'Fetching Letterboxd RSS feed...');
+        const entries = await SyncEngine.syncLetterboxd(username);
+        if (!entries.length) { statusEl.textContent = 'No entries'; statusEl.className = 'sync-status'; toast('No entries in Letterboxd feed'); return; }
+        updateSyncProgress(20, `Found ${entries.length} entries. Matching to TMDB...`);
+        const { results, matched } = await SyncEngine.matchToTmdb(entries, (i, t, title) => {
+          updateSyncProgress(20 + (i / t * 55), `Matching: ${title} (${i}/${t})`);
+        });
+        updateSyncProgress(75, `Matched ${matched}/${entries.length}. Applying to library...`);
+        SyncEngine.saveImportState('Letterboxd', results, 'merge');
+        const stats = await SyncEngine.applySyncResults(results, 'merge', (i, t, title) => {
+          updateSyncProgress(75 + (i / t * 25), `Adding: ${title} (${i}/${t})`);
+        });
+        statusEl.textContent = 'Synced';
+        statusEl.className = 'sync-status synced';
+        updateSyncTimestamps();
+        toast(`Letterboxd: +${stats.added} added, ${stats.diaryAdded} diary entries`);
+      } catch (err) {
+        statusEl.textContent = 'Error';
+        statusEl.className = 'sync-status sync-error';
+        toast('Letterboxd sync: ' + (err.message || 'Unknown error'));
+      }
+    });
+  });
+
+  // MAL Client ID — save on change
+  document.getElementById('malClientId').addEventListener('change', () => {
+    MalOAuth.setClientId(document.getElementById('malClientId').value);
+  });
+
+  // MAL Login
+  document.getElementById('malLoginBtn').addEventListener('click', async () => {
+    const clientId = document.getElementById('malClientId').value.trim();
+    if (!clientId) { toast('Enter your MAL Client ID first'); return; }
+    MalOAuth.setClientId(clientId);
+    const statusEl = document.getElementById('malSyncStatus');
+    try {
+      statusEl.textContent = 'Logging in...';
+      statusEl.className = 'sync-status syncing';
+      const username = await MalOAuth.login();
+      statusEl.textContent = 'Logged in';
+      statusEl.className = 'sync-status synced';
+      toast('Logged in to MAL as ' + username);
+      updateMalLoginState();
+    } catch (err) {
+      statusEl.textContent = 'Login failed';
+      statusEl.className = 'sync-status sync-error';
+      toast('MAL login failed: ' + err.message);
+    }
+  });
+
+  // MAL Logout
+  document.getElementById('malLogoutBtn').addEventListener('click', () => {
+    MalOAuth.logout();
+    document.getElementById('malSyncStatus').textContent = '';
+    document.getElementById('malSyncStatus').className = 'sync-status';
+    updateMalLoginState();
+    toast('Logged out of MAL');
+  });
+
+  function updateMalLoginState() {
+    const loggedIn = MalOAuth.isLoggedIn();
+    document.getElementById('malLoginBtn').style.display = loggedIn ? 'none' : '';
+    document.getElementById('malLogoutBtn').style.display = loggedIn ? '' : 'none';
+    document.getElementById('malSyncBtn').disabled = !loggedIn;
+    document.getElementById('malSyncBtn').classList.toggle('btn-disabled', !loggedIn);
+    const infoEl = document.getElementById('malUserInfo');
+    if (loggedIn) {
+      infoEl.style.display = 'block';
+      // Fetch username
+      MalOAuth._getUsername().then(name => {
+        document.getElementById('malUserLabel').textContent = 'Connected as: ' + name;
+      }).catch(() => {});
+    } else {
+      infoEl.style.display = 'none';
+    }
+  }
+
+  // MAL Sync (OAuth-based)
+  document.getElementById('malSyncBtn').addEventListener('click', async () => {
+    if (!MalOAuth.isLoggedIn()) { toast('Login to MAL first'); return; }
+    if (!TMDB.getKey()) { toast('Set your TMDB API key first'); return; }
+    const statusEl = document.getElementById('malSyncStatus');
+
+    await enqueueTask('Syncing MAL', async () => {
+      statusEl.textContent = 'Syncing...';
+      statusEl.className = 'sync-status syncing';
+      try {
+        updateSyncProgress(10, 'Fetching anime list from MAL...');
+        console.log('[WatchTracker] Fetching MAL animelist via OAuth API');
+        const entries = await MalOAuth.fetchAnimeList((count) => {
+          updateSyncProgress(10, `Fetched ${count} entries from MAL...`);
+        });
+        console.log('[WatchTracker] MAL entries:', entries.length);
+        if (!entries.length) { statusEl.textContent = 'No entries'; statusEl.className = 'sync-status'; toast('No entries found on MAL'); return; }
+        updateSyncProgress(25, `Found ${entries.length} entries. Matching to TMDB...`);
+        const { results, matched } = await SyncEngine.matchToTmdb(entries, (i, t, title) => {
+          updateSyncProgress(25 + (i / t * 50), `Matching: ${title} (${i}/${t})`);
+        });
+        console.log('[WatchTracker] TMDB matched:', matched, '/', entries.length);
+        updateSyncProgress(75, `Matched ${matched}/${entries.length}. Applying to library...`);
+        SyncEngine.saveImportState('MAL', results, 'merge');
+        const stats = await SyncEngine.applySyncResults(results, 'merge', (i, t, title) => {
+          updateSyncProgress(75 + (i / t * 25), `Adding: ${title} (${i}/${t})`);
+        });
+        console.log('[WatchTracker] Apply stats:', stats);
+        statusEl.textContent = 'Synced';
+        statusEl.className = 'sync-status synced';
+        SyncEngine._config.lastSync.mal = new Date().toISOString();
+        SyncEngine.saveConfig();
+        updateSyncTimestamps();
+        toast(`MAL: +${stats.added} added, ${stats.updated} updated`);
+      } catch (err) {
+        console.error('[WatchTracker] MAL sync error:', err);
+        statusEl.textContent = 'Error';
+        statusEl.className = 'sync-status sync-error';
+        toast('MAL sync: ' + (err.message || 'Unknown error'));
+      }
+    });
+  });
+
+  // Sync/Import progress helpers
+  function showSyncProgress(label) {
+    const area = document.getElementById('syncProgressArea');
+    area.classList.remove('hidden');
+    area.classList.remove('progress-done');
+    document.getElementById('syncProgressLabel').textContent = label || 'Working';
+    updateSyncProgress(0, 'Preparing...');
+  }
+  function hideSyncProgress() {
+    const area = document.getElementById('syncProgressArea');
+    area.classList.add('progress-done');
+    document.getElementById('syncProgressPct').textContent = 'Done';
+    setTimeout(() => area.classList.add('hidden'), 2500);
+  }
+  function updateSyncProgress(pct, text) {
+    const rounded = Math.min(Math.round(pct), 100);
+    document.getElementById('syncProgressFill').style.width = rounded + '%';
+    document.getElementById('syncProgressPct').textContent = rounded + '%';
+    document.getElementById('syncProgressText').textContent = text;
+  }
+  function updateSyncTimestamps() {
+    const cfg = SyncEngine.getConfig();
+    const lbEl = document.getElementById('lbLastSync');
+    const malEl = document.getElementById('malLastSync');
+    if (cfg.lastSync?.letterboxd) {
+      const d = new Date(cfg.lastSync.letterboxd);
+      lbEl.textContent = `Last synced: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+    }
+    if (cfg.lastSync?.mal) {
+      const d = new Date(cfg.lastSync.mal);
+      malEl.textContent = `Last synced: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+    }
+  }
 
   // ─── Theme Accordion Toggle ───
   document.getElementById('themeToggle').addEventListener('click', () => {

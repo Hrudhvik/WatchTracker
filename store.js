@@ -32,6 +32,7 @@ const Store = {
 
   addMovie(item) {
     if (this._data.movies.find(m => m.tmdbId === item.tmdbId)) return false;
+    if (item.malId && this._data.movies.find(m => m.malId === item.malId)) return false;
     this._data.movies.unshift(item);
     this._saveMovies();
     return true;
@@ -66,6 +67,7 @@ const Store = {
 
   addTvShow(item) {
     if (this._data.tvshows.find(t => t.tmdbId === item.tmdbId)) return false;
+    if (item.malId && this._data.tvshows.find(t => t.malId === item.malId)) return false;
     this._data.tvshows.unshift(item);
     this._saveTvShows();
     return true;
@@ -138,15 +140,65 @@ const Store = {
     }, null, 2);
   },
 
-  importAll(json) {
+  importAll(json, mode = 'replace') {
     const data = JSON.parse(json);
-    if (data.movies) this._data.movies = data.movies;
-    if (data.tvshows) this._data.tvshows = data.tvshows;
-    if (data.diary) this._data.diary = data.diary;
-    if (data.activity) this._data.activity = data.activity;
+    if (mode === 'replace') {
+      if (data.movies) this._data.movies = data.movies;
+      if (data.tvshows) this._data.tvshows = data.tvshows;
+      if (data.diary) this._data.diary = data.diary;
+      if (data.activity) this._data.activity = data.activity;
+    } else {
+      // Merge mode — add new items, don't overwrite existing
+      const stats = { moviesAdded: 0, tvAdded: 0, diaryAdded: 0 };
+      if (data.movies) {
+        data.movies.forEach(m => {
+          if (!this._data.movies.find(ex => ex.tmdbId === m.tmdbId)) {
+            this._data.movies.unshift(m);
+            stats.moviesAdded++;
+          }
+        });
+      }
+      if (data.tvshows) {
+        data.tvshows.forEach(t => {
+          if (!this._data.tvshows.find(ex => ex.tmdbId === t.tmdbId)) {
+            this._data.tvshows.unshift(t);
+            stats.tvAdded++;
+          }
+        });
+      }
+      if (data.diary) {
+        data.diary.forEach(d => {
+          const exists = this._data.diary.find(ex =>
+            ex.tmdbId === d.tmdbId && ex.date === d.date && ex.type === d.type && ex.action === d.action
+          );
+          if (!exists) {
+            this._data.diary.unshift(d);
+            stats.diaryAdded++;
+          }
+        });
+      }
+      if (data.activity) {
+        data.activity.forEach(a => {
+          if (!this._data.activity.find(ex => ex.timestamp === a.timestamp)) {
+            this._data.activity.unshift(a);
+          }
+        });
+        this._data.activity = this._data.activity.slice(0, 200);
+      }
+    }
     this._saveMovies();
     this._saveTvShows();
     chrome.storage.local.set({ diary: this._data.diary, activity: this._data.activity });
-    return { movies: this._data.movies.length, tvshows: this._data.tvshows.length };
+    return { movies: this._data.movies.length, tvshows: this._data.tvshows.length, diary: this._data.diary.length };
+  },
+
+  clearAll() {
+    this._data.movies = [];
+    this._data.tvshows = [];
+    this._data.diary = [];
+    this._data.activity = [];
+    this._saveMovies();
+    this._saveTvShows();
+    chrome.storage.local.set({ diary: [], activity: [] });
   },
 };

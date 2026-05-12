@@ -2267,3 +2267,272 @@ kbd {
   color: var(--text-2);
   font-family: var(--mono);
 }
+
+/* ═══════════════════════════════════════════
+   IMPORT/EXPORT & SYNC UI
+   ═══════════════════════════════════════════ */
+
+/* Import Mode Radio Row */
+.import-mode-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.import-mode-opt {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.import-mode-opt:hover {
+  border-color: var(--border-active);
+}
+.import-mode-opt input[type="radio"] {
+  display: none;
+}
+.import-mode-opt input[type="radio"]:checked + span {
+  color: var(--accent-light);
+}
+.import-mode-opt:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+.import-mode-opt span {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.import-mode-opt small {
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+/* Danger button */
+.btn-danger-sm {
+  padding: 8px 16px;
+  background: rgba(225, 112, 85, 0.1);
+  color: var(--dropped);
+  border: 1px solid rgba(225, 112, 85, 0.25);
+  border-radius: 8px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.btn-danger-sm:hover {
+  background: rgba(225, 112, 85, 0.2);
+  border-color: var(--dropped);
+}
+
+/* Sync Service Cards */
+.sync-service {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.sync-service-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sync-service-icon {
+  font-size: 18px;
+  width: 28px;
+  text-align: center;
+}
+.sync-service-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-0);
+  flex: 1;
+}
+.sync-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 10px;
+}
+.sync-status.syncing {
+  background: rgba(253, 203, 110, 0.15);
+  color: var(--on-hold);
+  animation: syncPulse 1.2s ease-in-out infinite;
+}
+.sync-status.synced {
+  background: rgba(0, 184, 148, 0.15);
+  color: var(--watching);
+}
+.sync-status.sync-error {
+  background: rgba(225, 112, 85, 0.15);
+  color: var(--dropped);
+}
+
+@keyframes syncPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.sync-input {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-0);
+  font-family: var(--font);
+  font-size: 13px;
+  outline: none;
+  transition: border var(--transition);
+}
+.sync-input::placeholder { color: var(--text-3); }
+.sync-input:focus { border-color: var(--accent); }
+
+.btn-sync {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sync-last {
+  font-size: 10px;
+  color: var(--text-3);
+  margin-top: 6px;
+  font-family: var(--mono);
+}
+
+/* Sync Progress */
+.sync-progress {
+  margin-top: 14px;
+  padding: 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.sync-progress.hidden { display: none; }
+.sync-progress-bar {
+  height: 4px;
+  background: var(--bg-4);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.sync-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-light));
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+.sync-progress-text {
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sync service text-based icons */
+.sync-icon-lb, .sync-icon-mal, .sync-icon-auto {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--mono);
+  letter-spacing: -0.5px;
+}
+.sync-icon-lb {
+  background: rgba(0, 208, 124, 0.15);
+  color: #00d07c;
+}
+.sync-icon-mal {
+  background: rgba(46, 81, 162, 0.2);
+  color: #5c7cfa;
+}
+.sync-icon-auto {
+  background: var(--accent-glow);
+  color: var(--accent-light);
+}
+
+/* Enhanced progress bar */
+.sync-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.sync-progress-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-0);
+}
+.sync-progress-pct {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--mono);
+  color: var(--accent-light);
+}
+.sync-progress.progress-done .sync-progress-fill {
+  width: 100% !important;
+  background: var(--watching);
+}
+.sync-progress.progress-done .sync-progress-pct {
+  color: var(--watching);
+}
+
+/* Disabled state for import/sync buttons during active task */
+.btn-ghost.btn-disabled,
+.btn-ghost.btn-disabled:hover {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Sync checkbox option */
+.sync-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.sync-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.sync-checkbox span {
+  user-select: none;
+}
+.sync-checkbox:hover span {
+  color: var(--text-1);
+}
+
+/* Source tag on poster cards (Anime vs TMDB) */
+.poster-source-tag {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  backdrop-filter: blur(8px);
+}
+.source-anime {
+  background: rgba(46, 81, 162, 0.35);
+  color: #7c9cf5;
+  border: 1px solid rgba(46, 81, 162, 0.4);
+}

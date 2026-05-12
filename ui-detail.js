@@ -6,12 +6,26 @@ const DetailUI = {
     page.innerHTML = '<div style="padding:40px;color:var(--text-3)">Loading...</div>';
     App.showPage('detail');
 
-    let d;
-    try { d = mediaType === 'movie' ? await TMDB.movieDetails(tmdbId) : await TMDB.tvDetails(tmdbId); }
-    catch (e) { page.innerHTML = `<div style="padding:40px;color:var(--dropped)">Failed: ${e.message}</div>`; return; }
-
     const isM = mediaType === 'movie';
     const stored = isM ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
+    let d;
+
+    // For MAL-only entries (negative tmdbId), build detail from stored data + Jikan
+    if (tmdbId < 0 && stored) {
+      d = await this._buildMalDetail(stored, isM);
+    } else {
+      try { d = isM ? await TMDB.movieDetails(tmdbId) : await TMDB.tvDetails(tmdbId); }
+      catch (e) {
+        // If TMDB fails but we have stored data (MAL entry with mapped but broken TMDB ID), use stored + Jikan
+        if (stored && stored.malId) {
+          d = await this._buildMalDetail(stored, isM);
+        } else {
+          page.innerHTML = `<div style="padding:40px;color:var(--dropped)">Failed: ${e.message}</div>`;
+          return;
+        }
+      }
+    }
+
     const inList = !!stored;
     const backdrop = TMDB.backdrop(d.backdrop_path);
     const poster = TMDB.poster(d.poster_path, 'w500');
@@ -127,7 +141,7 @@ const DetailUI = {
       <button class="btn-back" id="detailBackBtn">Back</button>
       <div class="detail-backdrop">${backdrop?`<img src="${backdrop}">`:'<div style="height:100%;background:var(--bg-2)"></div>'}<div class="detail-backdrop-grad"></div></div>
       <div class="detail-hero">
-        <div class="detail-poster-wrap">${poster?`<img src="${poster}">`:`<div class="no-poster-ph" style="width:200px;height:300px;border-radius:12px;">${ph}</div>`}</div>
+        <div class="detail-poster-wrap">${poster?`<img src="${poster}" class="detail-poster-img">`:`<div class="no-poster-ph" style="width:200px;height:300px;border-radius:12px;">${ph}</div>`}</div>
         <div class="detail-hero-info">
           <h1>${esc(title)}</h1>
           ${d.tagline?`<div class="detail-tagline">"${esc(d.tagline)}"</div>`:''}
@@ -199,6 +213,17 @@ const DetailUI = {
     }
 
     page.querySelectorAll('.detail-body [data-tmdb]').forEach(c => c.addEventListener('click', () => this.open(parseInt(c.dataset.tmdb), c.dataset.type)));
+
+    // Handle broken poster images
+    page.querySelectorAll('img').forEach(img => {
+      img.addEventListener('error', () => {
+        const ph = document.createElement('div');
+        ph.className = 'no-poster-ph';
+        ph.style.cssText = img.closest('.detail-poster-wrap') ? 'width:200px;height:300px;border-radius:12px;' : '';
+        ph.textContent = isM ? 'MOV' : 'TV';
+        img.replaceWith(ph);
+      });
+    });
   },
 
   _editModal(tmdbId, mt, title, details) {
@@ -321,5 +346,84 @@ const DetailUI = {
         const cfg = cfgMap[ns]; if (cfg) { sel.textContent = cfg.l; const dot = page.querySelector('#detailStatusBtn .dd-dot'); if (dot) dot.style.background = cfg.c; }
       }
     });
+  },
+
+  // Build a TMDB-compatible detail object from stored MAL data + optional Jikan enrichment
+  async _buildMalDetail(stored, isMovie) {
+    const d = {
+      id: stored.tmdbId,
+      title: stored.title,
+      name: stored.title,
+      poster_path: stored.posterPath || null,
+      backdrop_path: stored.backdropPath || null,
+      release_date: stored.endDate || '',
+      first_air_date: stored.startDate || '',
+      last_air_date: '',
+      vote_average: stored.voteAverage || 0,
+      vote_count: 0,
+      genres: (stored.genres || []).map(g => typeof g === 'string' ? { name: g } : g),
+      overview: '',
+      runtime: stored.runtime || 0,
+      number_of_seasons: stored.totalSeasons || 0,
+      number_of_episodes: stored.totalEpisodes || stored.episodes || 0,
+      seasons: (stored.seasons || []).map(s => ({
+        season_number: s.seasonNumber,
+        episode_count: s.episodeCount || 0,
+        poster_path: s.posterPath || null,
+        name: 'Season ' + s.seasonNumber,
+      })),
+      credits: { cast: [], crew: [] },
+      videos: { results: [] },
+      recommendations: { results: [] },
+      production_companies: [],
+      production_countries: [],
+      spoken_languages: [],
+      created_by: [],
+      networks: [],
+      episode_run_time: [],
+      status: '',
+      tagline: '',
+      budget: 0,
+      revenue: 0,
+    };
+
+    // Try to enrich with Jikan data if we have a malId
+    if (stored.malId) {
+      try {
+        const res = await bgFetch(`https://api.jikan.moe/v4/anime/${stored.malId}/full`);
+        if (res.ok) {
+          const jData = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
+          const anime = jData?.data;
+          if (anime) {
+            d.overview = anime.synopsis || '';
+            d.tagline = anime.title_japanese || '';
+            d.vote_average = anime.score || d.vote_average;
+            d.vote_count = anime.scored_by || 0;
+            if (anime.images?.jpg?.large_image_url) {
+              d.poster_path = anime.images.jpg.large_image_url;
+            }
+            if (anime.trailer?.images?.maximum_image_url) {
+              d.backdrop_path = anime.trailer.images.maximum_image_url;
+            }
+            d.genres = (anime.genres || []).concat(anime.themes || []).map(g => ({ name: g.name }));
+            d.status = anime.status || '';
+            if (anime.aired?.from) d.first_air_date = anime.aired.from.substring(0, 10);
+            if (anime.aired?.to) d.last_air_date = anime.aired.to.substring(0, 10);
+            d.release_date = d.first_air_date;
+            d.runtime = anime.duration ? parseInt(anime.duration) || 0 : 0;
+            d.number_of_episodes = anime.episodes || d.number_of_episodes;
+            d.production_companies = (anime.studios || []).map(s => ({ name: s.name }));
+
+            // Update stored poster if we got a better one
+            if (d.poster_path && d.poster_path.startsWith('http')) {
+              if (isMovie) Store.updateMovie(stored.tmdbId, { posterPath: d.poster_path, genres: d.genres.map(g => g.name), voteAverage: d.vote_average });
+              else Store.updateTvShow(stored.tmdbId, { posterPath: d.poster_path, genres: d.genres.map(g => g.name), voteAverage: d.vote_average });
+            }
+          }
+        }
+      } catch (e) { /* proceed with stored data only */ }
+    }
+
+    return d;
   },
 };

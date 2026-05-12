@@ -4,11 +4,35 @@ const ListUI = {
   _statusFilter: 'all', _typeFilter: 'all', _sortBy: 'dateAdded', _viewMode: 'poster',
 
   init() {
+    // Restore saved filter state
+    chrome.storage.local.get(['_listPrefs'], (d) => {
+      const p = d._listPrefs || {};
+      if (p.statusFilter) this._statusFilter = p.statusFilter;
+      if (p.typeFilter) this._typeFilter = p.typeFilter;
+      if (p.sortBy) this._sortBy = p.sortBy;
+      if (p.viewMode) this._viewMode = p.viewMode;
+      // Apply restored state to UI
+      document.querySelectorAll('.list-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.status === this._statusFilter);
+      });
+      document.querySelectorAll('.type-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.type === this._typeFilter);
+      });
+      document.querySelectorAll('.view-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.grid === this._viewMode);
+      });
+      const sortLabel = document.getElementById('listSortLabel');
+      const sortItem = document.querySelector(`.dd-item[data-val="${this._sortBy}"]`);
+      if (sortLabel && sortItem) sortLabel.textContent = sortItem.textContent;
+      this.render();
+    });
+
     document.querySelectorAll('.list-tab').forEach(tab => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.list-tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         this._statusFilter = tab.dataset.status;
+        this._savePrefs();
         this.render();
       });
     });
@@ -17,6 +41,7 @@ const ListUI = {
         document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         this._typeFilter = btn.dataset.type;
+        this._savePrefs();
         this.render();
       });
     });
@@ -35,6 +60,7 @@ const ListUI = {
         document.getElementById('listSortLabel').textContent = item.textContent;
         sortMenu.querySelectorAll('.dd-item').forEach(i => i.classList.toggle('active', i === item));
         sortMenu.classList.add('hidden'); sortDD.classList.remove('open');
+        this._savePrefs();
         this.render();
       });
     });
@@ -46,9 +72,19 @@ const ListUI = {
         document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         this._viewMode = btn.dataset.grid;
+        this._savePrefs();
         this.render();
       });
     });
+  },
+
+  _savePrefs() {
+    chrome.storage.local.set({ _listPrefs: {
+      statusFilter: this._statusFilter,
+      typeFilter: this._typeFilter,
+      sortBy: this._sortBy,
+      viewMode: this._viewMode,
+    }});
   },
 
   _getItems() {
@@ -93,7 +129,7 @@ const ListUI = {
     c.innerHTML = `<div class="content-grid">${items.map(m => {
       const poster = TMDB.poster(m.posterPath, 'w342');
       const ph = m.mediaType === 'movie' ? 'MOV' : 'TV';
-      const posterHtml = poster ? `<img src="${poster}" loading="lazy">` : `<div class="no-poster-ph">${ph}</div>`;
+      const posterHtml = poster ? `<img src="${poster}" loading="lazy" class="poster-img">` : `<div class="no-poster-ph">${ph}</div>`;
       const pips = m.mediaType === 'tv' && (m.seasons||[]).length ? `<div class="season-pips">${(m.seasons||[]).map(s => {
         const w = s.episodesWatched||0, t = s.episodeCount||0;
         return `<div class="season-pip ${w>=t&&t>0?'pip-done':w>0?'pip-active':''}"></div>`;
@@ -102,6 +138,7 @@ const ListUI = {
         <div class="poster-wrap">${posterHtml}<div class="poster-overlay"></div>
           <div class="poster-badge badge-${m.watchStatus}">${sl[m.watchStatus]}</div>
           <div class="poster-type-tag">${m.mediaType==='movie'?'Movie':'TV'}</div>
+          ${m.sourceTag==='anime'?'<div class="poster-source-tag source-anime">Anime</div>':''}
         </div>
         <div class="grid-card-info">
           <div class="grid-card-title" title="${esc(m.title)}">${esc(m.title)}</div>
@@ -182,6 +219,16 @@ const ListUI = {
   _bind(c) {
     c.querySelectorAll('[data-tmdb]').forEach(el => {
       el.addEventListener('click', () => DetailUI.open(parseInt(el.dataset.tmdb), el.dataset.type));
+    });
+    // Handle broken poster images — replace with placeholder
+    c.querySelectorAll('img').forEach(img => {
+      img.addEventListener('error', () => {
+        const wrap = img.closest('.poster-wrap') || img.closest('.recent-poster-wrap') || img.parentElement;
+        const ph = document.createElement('div');
+        ph.className = 'no-poster-ph';
+        ph.textContent = img.closest('[data-type="movie"]') ? 'MOV' : 'TV';
+        img.replaceWith(ph);
+      });
     });
   },
 };

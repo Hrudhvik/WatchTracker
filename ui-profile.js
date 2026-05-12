@@ -17,7 +17,8 @@ const ProfileUI = {
     const tEps=tvshows.reduce((s,t)=>s+(t.seasons||[]).reduce((se,ss)=>se+(ss.episodesWatched||0),0),0);
 
     const recent = [...movies.map(m=>({...m,mediaType:'movie'})),...tvshows.map(t=>({...t,mediaType:'tv'}))]
-      .sort((a,b)=>new Date(b.dateUpdated||b.dateAdded)-new Date(a.dateUpdated||a.dateAdded)).slice(0,5);
+      .filter(item => item.watchStatus === 'completed')
+      .sort((a,b)=>new Date(b.endDate||b.dateUpdated||b.dateAdded)-new Date(a.endDate||a.dateUpdated||a.dateAdded)).slice(0,8);
     const acts = activity.slice(0,10);
     const sl = {watching:'Watching',plan_to_watch:'Plan to Watch',completed:'Completed',on_hold:'On Hold',dropped:'Dropped'};
 
@@ -51,9 +52,18 @@ const ProfileUI = {
           <div class="stats-totals"><div class="stats-total-item"><span>Total</span><span class="stats-val">${tT}</span></div><div class="stats-total-item"><span>Rewatched</span><span class="stats-val">${tRw}</span></div></div>
         </div></div>
       </div>
-      <div class="profile-section"><h3>Recently Updated</h3>${recent.length?`<div class="recent-row">${recent.map(item=>{const poster=TMDB.poster(item.posterPath,'w185');return`<div class="recent-card" data-tmdb="${item.tmdbId}" data-type="${item.mediaType}"><div class="recent-poster-wrap">${poster?`<img src="${poster}" loading="lazy">`:`<div class="no-poster-ph" style="width:100%;height:100%;font-size:10px;">${item.mediaType==='movie'?'MOV':'TV'}</div>`}<div class="poster-overlay"></div><div class="poster-badge badge-${item.watchStatus}">${sl[item.watchStatus]}</div></div><div class="recent-info"><div class="recent-title">${esc(item.title)}</div><div class="recent-meta">${item.mediaType==='movie'?'Movie':'TV'} · ${item.year||''}</div></div></div>`;}).join('')}</div>`:'<div class="empty-inline">Nothing yet</div>'}</div>
+      <div class="profile-section"><h3>Recently Watched</h3>${recent.length?`<div class="recent-row">${recent.map(item=>{const poster=TMDB.poster(item.posterPath,'w185');return`<div class="recent-card" data-tmdb="${item.tmdbId}" data-type="${item.mediaType}"><div class="recent-poster-wrap">${poster?`<img src="${poster}" loading="lazy">`:`<div class="no-poster-ph" style="width:100%;height:100%;font-size:10px;">${item.mediaType==='movie'?'MOV':'TV'}</div>`}<div class="poster-overlay"></div></div><div class="recent-info"><div class="recent-title">${esc(item.title)}</div><div class="recent-meta">${item.mediaType==='movie'?'Movie':'TV'} · ${item.year||''}</div></div></div>`;}).join('')}</div>`:'<div class="empty-inline">Nothing completed yet</div>'}</div>
       <div class="profile-section"><h3>Last Activity</h3>${acts.length?`<div class="activity-list">${acts.map(a=>{const poster=TMDB.poster(a.posterPath,'w92');return`<div class="activity-item" data-tmdb="${a.tmdbId}" data-type="${a.type}"><div class="activity-poster">${poster?`<img src="${poster}">`:`<div class="no-poster-ph" style="width:44px;height:66px;border-radius:6px;font-size:10px;">${a.type==='movie'?'MOV':'TV'}</div>`}</div><div class="activity-info"><div class="activity-title">${esc(a.title)}</div><div class="activity-detail">${esc(a.detail||a.action)}</div></div><div class="activity-time">${ago(a.timestamp)}</div></div>`;}).join('')}</div>`:'<div class="empty-inline">No activity yet</div>'}</div>
     </div>`;
     page.querySelectorAll('[data-tmdb]').forEach(el=>el.addEventListener('click',()=>DetailUI.open(parseInt(el.dataset.tmdb),el.dataset.type)));
+    page.querySelectorAll('img').forEach(img => {
+      img.addEventListener('error', () => {
+        const ph = document.createElement('div');
+        ph.className = 'no-poster-ph';
+        ph.style.cssText = 'width:100%;height:100%;font-size:10px;';
+        ph.textContent = img.closest('[data-type="movie"]') ? 'MOV' : 'TV';
+        img.replaceWith(ph);
+      });
+    });
   },
 };

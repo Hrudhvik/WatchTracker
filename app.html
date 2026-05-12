@@ -177,13 +177,133 @@
 
         <hr>
         <div class="field">
-          <label>Data Management</label>
-          <div class="btn-row">
-            <button id="exportBtn" class="btn-ghost">Export JSON</button>
-            <button id="importBtn" class="btn-ghost">Import JSON</button>
-            <input type="file" id="importFile" accept=".json" hidden>
+          <button class="settings-accordion" id="dataToggle">
+            <span>Data Management</span>
+            <span class="accordion-arrow" id="dataArrow">&#9662;</span>
+          </button>
+          <div class="settings-panel" id="dataPanel">
+
+            <!-- Export Section -->
+            <div class="ct-section">
+              <p class="ct-section-label">Export</p>
+              <div class="btn-row" style="flex-wrap:wrap;gap:6px;">
+                <button id="exportBtn" class="btn-ghost">Full Backup (JSON)</button>
+                <button id="exportCSVBtn" class="btn-ghost">Watchlist CSV</button>
+                <button id="exportDiaryCSVBtn" class="btn-ghost">Diary CSV</button>
+                <button id="exportLetterboxdBtn" class="btn-ghost">Letterboxd CSV</button>
+              </div>
+            </div>
+
+            <!-- Import Section -->
+            <div class="ct-section">
+              <p class="ct-section-label">Import</p>
+              <div class="import-mode-row">
+                <label class="import-mode-opt">
+                  <input type="radio" name="importMode" value="merge" checked> <span>Merge</span>
+                  <small>Add new, keep existing</small>
+                </label>
+                <label class="import-mode-opt">
+                  <input type="radio" name="importMode" value="replace"> <span>Replace</span>
+                  <small>Overwrite everything</small>
+                </label>
+              </div>
+              <div class="btn-row" style="flex-wrap:wrap;gap:6px;margin-top:8px;">
+                <button id="importBtn" class="btn-ghost">WatchTracker JSON</button>
+                <button id="importLetterboxdBtn" class="btn-ghost">Letterboxd ZIP / CSV</button>
+                <button id="importMalXmlBtn" class="btn-ghost">MAL XML Export</button>
+              </div>
+              <input type="file" id="importFile" accept=".json" hidden>
+              <input type="file" id="importLbCsvFile" accept=".zip,.csv" hidden>
+              <input type="file" id="importMalXmlFile" accept=".xml,.gz" hidden>
+            </div>
+
+            <!-- Danger Zone -->
+            <div class="ct-section" style="margin-top:18px;">
+              <p class="ct-section-label" style="color:var(--dropped);">Danger Zone</p>
+              <button id="clearAllBtn" class="btn-danger-sm">Clear All Data</button>
+            </div>
           </div>
         </div>
+
+        <hr>
+        <div class="field">
+          <button class="settings-accordion" id="syncToggle">
+            <span>External Sync</span>
+            <span class="accordion-arrow" id="syncArrow">&#9662;</span>
+          </button>
+          <div class="settings-panel" id="syncPanel">
+            <p class="field-hint" style="margin-bottom:12px;">Connect your accounts to sync diary entries and watchlist updates. Uses public RSS feeds and APIs — no passwords needed.</p>
+
+            <!-- Letterboxd Sync -->
+            <div class="sync-service">
+              <div class="sync-service-header">
+                <span class="sync-service-icon sync-icon-lb">LB</span>
+                <span class="sync-service-name">Letterboxd</span>
+                <span class="sync-status" id="lbSyncStatus"></span>
+              </div>
+              <div class="input-row" style="margin-top:6px;">
+                <input type="text" id="lbUsername" placeholder="Your Letterboxd username" class="sync-input">
+                <button id="lbSyncBtn" class="btn-ghost btn-sync">Sync Now</button>
+              </div>
+              <div class="sync-last" id="lbLastSync"></div>
+            </div>
+
+            <!-- MAL Sync (OAuth) -->
+            <div class="sync-service">
+              <div class="sync-service-header">
+                <span class="sync-service-icon sync-icon-mal">MAL</span>
+                <span class="sync-service-name">MyAnimeList</span>
+                <span class="sync-status" id="malSyncStatus"></span>
+              </div>
+              <p class="field-hint" style="margin:6px 0 4px;">Get a free Client ID at <a href="https://myanimelist.net/apiconfig" target="_blank">myanimelist.net/apiconfig</a>. Set App Type to "other", redirect URI to <code id="malRedirectUri" style="font-size:10px;user-select:all;"></code></p>
+              <div class="input-row" style="margin-top:6px;">
+                <input type="text" id="malClientId" placeholder="MAL Client ID" class="sync-input">
+              </div>
+              <div class="btn-row" style="margin-top:8px;">
+                <button id="malLoginBtn" class="btn-ghost btn-sync">Login with MAL</button>
+                <button id="malSyncBtn" class="btn-ghost btn-sync" disabled>Sync Now</button>
+                <button id="malLogoutBtn" class="btn-ghost btn-sync" style="display:none;">Logout</button>
+              </div>
+              <div class="mal-user-info" id="malUserInfo" style="display:none;margin-top:8px;">
+                <span class="sync-progress-label" id="malUserLabel"></span>
+              </div>
+              <label class="sync-checkbox" style="margin-top:8px;">
+                <input type="checkbox" id="malEnglishTitles"> <span>Use English titles when available</span>
+              </label>
+              <div class="sync-last" id="malLastSync"></div>
+            </div>
+
+            <!-- Auto-Sync -->
+            <div class="sync-service" style="border-bottom:none;">
+              <div class="sync-service-header">
+                <span class="sync-service-icon sync-icon-auto">A</span>
+                <span class="sync-service-name">Auto Sync</span>
+              </div>
+              <div class="input-row" style="margin-top:6px;">
+                <select id="syncInterval" class="edit-select" style="flex:1;">
+                  <option value="0">Disabled</option>
+                  <option value="60">Every hour</option>
+                  <option value="360">Every 6 hours</option>
+                  <option value="720">Every 12 hours</option>
+                  <option value="1440">Daily</option>
+                </select>
+                <button id="saveUsernames" class="btn-ghost btn-sync">Save</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Progress bar — lives at modal level so it's visible during imports AND syncs -->
+        <div id="syncProgressArea" class="sync-progress hidden">
+          <div class="sync-progress-header">
+            <span class="sync-progress-label" id="syncProgressLabel">Working</span>
+            <span class="sync-progress-pct" id="syncProgressPct">0%</span>
+          </div>
+          <div class="sync-progress-bar"><div class="sync-progress-fill" id="syncProgressFill"></div></div>
+          <div class="sync-progress-text" id="syncProgressText">Preparing...</div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -192,6 +312,7 @@
 
   <script src="tmdb.js"></script>
   <script src="store.js"></script>
+  <script src="sync.js"></script>
   <script src="ui-list.js"></script>
   <script src="ui-detail.js"></script>
   <script src="ui-profile.js"></script>
