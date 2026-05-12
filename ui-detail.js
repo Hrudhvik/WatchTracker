@@ -152,9 +152,21 @@ const DetailUI = {
           <div class="detail-actions" style="display:flex; gap:10px; align-items:center;">
             ${actions}
             <button id="detailManualSyncBtn" class="btn-ghost" style="font-size:12px; padding:2px 6px; margin-left:auto; height:auto; min-height:0;">&#128279; Link</button>
-            <a href="https://www.themoviedb.org/${isM?'movie':'tv'}/${Math.abs(tmdbId)}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">↗ TMDB</a>
-            ${stored && stored.malId ? `<a href="https://myanimelist.net/anime/${stored.malId}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">↗ MAL</a>` : ''}
-          </div>${dates}
+            <button id="detailMergeBtn" class="btn-ghost" style="font-size:12px; padding:2px 6px; height:auto; min-height:0;">Merge</button>
+            <a href="https://www.themoviedb.org/${isM?'movie':'tv'}/${Math.abs(tmdbId)}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; TMDB</a>
+            ${stored && stored.malId ? `<a href="https://myanimelist.net/anime/${stored.malId}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; MAL</a>` : ''}
+          </div>
+          ${stored && stored._id ? `<div style="font-size:10px;color:var(--text-3);opacity:0.5;margin-top:4px;">ID: ${stored._id}</div>` : ''}
+          ${(() => {
+            // Detect same-tmdbId duplicates
+            const dupes = (isM ? Store.getMovies() : Store.getTvShows()).filter(x => x.tmdbId === tmdbId && x._id !== (stored && stored._id));
+            if (dupes.length === 0) return '';
+            return `<div class="detail-dupe-banner" style="margin-top:8px;padding:8px 12px;border-radius:8px;background:rgba(255,180,0,0.12);border:1px solid rgba(255,180,0,0.3);font-size:12px;color:var(--text-2);">
+              <strong style="color:#ffb400;">Duplicate detected</strong> — ${dupes.length} other ${dupes.length > 1 ? 'entries have' : 'entry has'} the same TMDB ID.
+              ${dupes.map(d => `<button class="btn-ghost detail-dupe-merge-btn" data-dupe-id="${d._id}" style="font-size:11px;padding:2px 8px;margin:4px 4px 0 0;height:auto;min-height:0;">Merge #${d._id}${d.sourceTag ? ' ('+d.sourceTag+')' : ''}</button>`).join('')}
+            </div>`;
+          })()}
+          ${dates}
         </div>
       </div>
       <div class="detail-body">
@@ -214,6 +226,24 @@ const DetailUI = {
     if (dBtn) dBtn.addEventListener('click', () => this._diaryLogModal(tmdbId, mediaType, title, stored?.posterPath, null));
     const msBtn = page.querySelector('#detailManualSyncBtn');
     if (msBtn) msBtn.addEventListener('click', () => this._manualSyncModal(tmdbId, mediaType, stored));
+    const mergeBtn = page.querySelector('#detailMergeBtn');
+    if (mergeBtn) mergeBtn.addEventListener('click', () => this._mergeModal(tmdbId, mediaType, stored));
+
+    // One-click merge for same-tmdbId duplicates
+    page.querySelectorAll('.detail-dupe-merge-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const dupeId = parseInt(btn.dataset.dupeId);
+        const dupeItem = Store.getById(dupeId);
+        if (!dupeItem) { toast('Entry not found'); return; }
+        if (!confirm(`Merge #${dupeId} "${dupeItem.title}" into this entry?\n\nThe duplicate will be removed and its data transferred here.`)) return;
+        const dupeType = Store.getByIdType(dupeId)?.mediaType || mediaType;
+        Store.mergeItems(tmdbId, mediaType, dupeItem.tmdbId, dupeType, dupeId);
+        if (typeof ListUI !== 'undefined') ListUI.render();
+        if (typeof App !== 'undefined') App.refreshCounts();
+        toast(`Merged #${dupeId} into this entry`);
+        this.open(tmdbId, mediaType);
+      });
+    });
 
     if (!isM && inList) {
       this._bindSeason(page, tmdbId, tmdbS);
@@ -242,8 +272,15 @@ const DetailUI = {
       <div class="modal-box edit-modal-box" style="max-width:400px;">
         <div class="modal-header"><h2>Link & Sync</h2><button class="modal-close-btn" id="msClose">&#10005;</button></div>
         <div class="modal-body">
-          <p class="field-hint" style="margin-bottom:12px;">Paste a TMDB or MyAnimeList URL to link and fetch updated details.</p>
-          <div class="input-row"><input type="text" id="msUrl" placeholder="https://..." class="sync-input"></div>
+          <p class="field-hint" style="margin-bottom:12px;">Paste a TMDB or MyAnimeList URL to link and fetch updated details, or toggle the media type below.</p>
+          <div class="input-row" style="margin-bottom:12px;"><input type="text" id="msUrl" placeholder="https://..." class="sync-input"></div>
+          <div class="edit-field" style="margin-bottom:12px;">
+            <div class="edit-field-label">Media Type</div>
+            <div class="import-mode-row">
+              <label class="import-mode-opt"><input type="radio" name="msType" value="movie" ${isM?'checked':''}> <span>Movie</span></label>
+              <label class="import-mode-opt"><input type="radio" name="msType" value="tv" ${!isM?'checked':''}> <span>TV Show</span></label>
+            </div>
+          </div>
           <div class="btn-row" style="margin-top:16px;">
             <button id="msSyncBtn" class="btn-accent" style="flex:1;">Sync</button>
           </div>
@@ -258,7 +295,10 @@ const DetailUI = {
 
     m.querySelector('#msSyncBtn').addEventListener('click', async () => {
       const url = m.querySelector('#msUrl').value.trim();
-      if (!url) return toast('Please enter a URL');
+      const targetType = m.querySelector('input[name="msType"]:checked').value;
+      const typeChanged = targetType !== mediaType;
+
+      if (!url && !typeChanged) return toast('Please enter a URL or change the media type');
 
       const btn = m.querySelector('#msSyncBtn');
       btn.textContent = 'Syncing...';
@@ -266,51 +306,159 @@ const DetailUI = {
 
       try {
         let newTmdbId = tmdbId;
+        let finalType = targetType;
         let malId = stored ? stored.malId : null;
         let requireTmdbUpdate = false;
         let requireMalUpdate = false;
 
-        if (url.includes('myanimelist.net/anime/')) {
-          const match = url.match(/anime\/(\d+)/);
-          if (match) {
-            malId = parseInt(match[1]);
-            requireMalUpdate = true;
+        if (url) {
+          if (url.includes('myanimelist.net/anime/')) {
+            const match = url.match(/anime\/(\d+)/);
+            if (match) {
+              malId = parseInt(match[1]);
+              requireMalUpdate = true;
+            }
+          } else if (url.includes('themoviedb.org/')) {
+            const match = url.match(/(movie|tv)\/(\d+)/);
+            if (match) {
+              finalType = match[1]; // Override toggle if URL dictates type
+              newTmdbId = parseInt(match[2]);
+              requireTmdbUpdate = true;
+            }
+          } else {
+            throw new Error('Unsupported URL. Use TMDB or MAL links.');
           }
-        } else if (url.includes('themoviedb.org/')) {
-          const match = url.match(/(movie|tv)\/(\d+)/);
-          if (match) {
-            const parsedType = match[1];
-            if (parsedType !== mediaType) throw new Error(`Type mismatch: URL is ${parsedType}, current is ${mediaType}`);
-            newTmdbId = parseInt(match[2]);
-            requireTmdbUpdate = true;
-          }
-        } else {
-          throw new Error('Unsupported URL. Use TMDB or MAL links.');
         }
 
+        const actualTypeChanged = finalType !== mediaType;
+        
         if (requireTmdbUpdate && newTmdbId !== tmdbId && stored) {
           Store.migrateTmdbId(tmdbId, newTmdbId, mediaType);
         }
 
+        if (actualTypeChanged && stored) {
+          Store.migrateType(newTmdbId, mediaType, finalType);
+          requireTmdbUpdate = true; // force fetching details for the new type!
+        }
+        
+        if (requireTmdbUpdate || actualTypeChanged) {
+          if (finalType === 'movie') {
+            const d = await TMDB.movieDetails(newTmdbId);
+            Store.updateMovie(newTmdbId, {
+              title: d.title, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.release_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, runtime: d.runtime || 0, genres: (d.genres || []).map(g => g.name)
+            });
+          } else {
+            const d = await TMDB.tvDetails(newTmdbId);
+            Store.updateTvShow(newTmdbId, {
+              title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.first_air_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: (d.genres || []).map(g => g.name)
+            });
+          }
+        }
+
         if (requireMalUpdate && stored) {
-          if (isM) Store.updateMovie(newTmdbId, { malId });
+          if (finalType === 'movie') Store.updateMovie(newTmdbId, { malId });
           else Store.updateTvShow(newTmdbId, { malId });
           // Fetch Jikan info to update poster/details immediately
           const jikan = await SyncEngine._fetchJikanInfo(malId);
           if (jikan && jikan.poster) {
-            if (isM) Store.updateMovie(newTmdbId, { posterPath: jikan.poster });
+            if (finalType === 'movie') Store.updateMovie(newTmdbId, { posterPath: jikan.poster });
             else Store.updateTvShow(newTmdbId, { posterPath: jikan.poster });
           }
         }
 
+        if (typeof ListUI !== 'undefined') ListUI.render();
+
         toast('Linked and synced successfully!');
         close();
-        this.open(newTmdbId, mediaType);
+        this.open(newTmdbId, finalType);
       } catch (err) {
         toast('Error: ' + err.message);
         btn.textContent = 'Sync';
         btn.disabled = false;
       }
+    });
+  },
+
+  _mergeModal(tmdbId, mediaType, stored) {
+    if (!stored) { toast('Add this to your list first'); return; }
+    const sl = { watching: 'Watching', plan_to_watch: 'Plan to Watch', completed: 'Completed', on_hold: 'On Hold', dropped: 'Dropped' };
+    const currentPoster = TMDB.poster(stored.posterPath, 'w185');
+
+    const html = `<div class="modal-backdrop edit-modal-backdrop" id="mergeModal">
+      <div class="modal-box edit-modal-box" style="max-width:480px;">
+        <div class="modal-header"><h2>Merge</h2><button class="modal-close-btn" id="mergeClose">&#10005;</button></div>
+        <div class="modal-body">
+          <p class="field-hint" style="margin-bottom:12px;">Enter the ID of the duplicate entry to merge into this one. You can find the ID on any entry's detail page.</p>
+          <div class="input-row" style="margin-bottom:16px;">
+            <input type="text" id="mergeIdInput" class="sync-input" placeholder="Entry ID (e.g. 42)" style="flex:1;">
+            <button id="mergeLookupBtn" class="btn-ghost">Look up</button>
+          </div>
+          <div id="mergePreview" style="display:none;"></div>
+          <hr style="margin:16px 0;">
+          <div class="edit-actions">
+            <button class="btn-accent" id="mergeConfirmBtn" disabled>Merge</button>
+            <button class="btn-ghost" id="mergeCancelBtn">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', html);
+    const modal = document.getElementById('mergeModal');
+    const close = () => modal.remove();
+    modal.querySelector('#mergeClose').addEventListener('click', close);
+    modal.querySelector('#mergeCancelBtn').addEventListener('click', close);
+    modal.addEventListener('click', e => { if (e.target === modal) close(); });
+
+    const preview = modal.querySelector('#mergePreview');
+    const confirmBtn = modal.querySelector('#mergeConfirmBtn');
+    const idInput = modal.querySelector('#mergeIdInput');
+    let foundItem = null;
+
+    const doLookup = () => {
+      const val = parseInt(idInput.value.trim());
+      if (!val) { toast('Enter a valid ID'); return; }
+
+      const all = Store.getAll();
+      const match = all.find(i => i._id === val);
+      if (!match) { preview.style.display = 'none'; confirmBtn.disabled = true; toast('No entry found with ID #' + val); return; }
+      if (match.tmdbId === tmdbId && match.mediaType === mediaType) { toast('That is this entry'); return; }
+
+      foundItem = match;
+      const p = TMDB.poster(match.posterPath, 'w185');
+      const genres = (match.genres || []).slice(0, 2).join(', ');
+      preview.style.display = 'block';
+      preview.innerHTML = `
+        <div style="display:flex;gap:12px;align-items:flex-start;padding:12px;border-radius:10px;border:2px solid var(--accent);background:var(--bg-3);">
+          ${p ? `<img src="${p}" style="width:60px;height:90px;border-radius:8px;object-fit:cover;">` : `<div class="no-poster-ph" style="width:60px;height:90px;border-radius:8px;font-size:11px;">${match.mediaType === 'movie' ? 'MOV' : 'TV'}</div>`}
+          <div style="min-width:0;flex:1;">
+            <div style="font-weight:600;color:var(--text-1);margin-bottom:2px;">${esc(match.title)}</div>
+            <div style="font-size:12px;color:var(--text-2);">${match.mediaType === 'movie' ? 'Movie' : 'TV Show'} · ${match.year || '—'}</div>
+            <div style="font-size:12px;color:var(--text-3);">${sl[match.watchStatus] || ''}</div>
+            ${genres ? `<div style="font-size:12px;color:var(--text-3);">${genres}</div>` : ''}
+            ${match.malId ? `<div style="font-size:12px;color:var(--text-3);">MAL: ${match.malId}</div>` : ''}
+            ${match.sourceTag ? `<div style="font-size:12px;color:var(--text-3);">Source: ${match.sourceTag}</div>` : ''}
+          </div>
+          <div style="font-size:10px;color:var(--text-3);text-align:right;">#${match._id}<br>TMDB: ${match.tmdbId}</div>
+        </div>
+        <p class="field-hint" style="margin-top:8px;">This entry will be <strong>removed</strong> and its diary/activity data merged into "${esc(stored.title)}".</p>`;
+      confirmBtn.disabled = false;
+    };
+
+    modal.querySelector('#mergeLookupBtn').addEventListener('click', doLookup);
+    idInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLookup(); });
+    idInput.focus();
+
+    confirmBtn.addEventListener('click', () => {
+      if (!foundItem) return;
+      if (!confirm(`Merge "${foundItem.title}" into "${stored.title}"?\n\nThis will transfer all diary and activity data and then delete "${foundItem.title}".`)) return;
+
+      Store.mergeItems(tmdbId, mediaType, foundItem.tmdbId, foundItem.mediaType);
+      close();
+      if (typeof ListUI !== 'undefined') ListUI.render();
+      if (typeof App !== 'undefined') App.refreshCounts();
+      toast(`Merged "${foundItem.title}" into "${stored.title}"`);
+      this.open(tmdbId, mediaType);
     });
   },
 

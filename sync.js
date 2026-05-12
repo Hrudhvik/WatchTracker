@@ -1594,7 +1594,8 @@ const ImportExport = {
 
     // Parse the files
     for (const f of files) {
-      const text = await f.text();
+      let text = await f.text();
+      text = text.replace(/^\uFEFF/, '');
       const name = f.name.toLowerCase();
       if (name.includes('watched')) watchedCSV = this._parseCSVLines(text);
       else if (name.includes('diary')) diaryCSV = this._parseCSVLines(text);
@@ -1621,19 +1622,24 @@ const ImportExport = {
       }
     }
 
+    const tmdbCache = {}; // cache: letterboxd URI -> { type, id }
+
     const getTmdbId = async (uri) => {
+      if (tmdbCache[uri]) return tmdbCache[uri];
       try {
         const res = await bgFetch(uri);
-        if (!res || !res.body) return null;
+        if (!res || !res.body) { console.warn('[LB Import] Empty response for:', uri); return null; }
         
         const linkMatch = res.body.match(/href="[^"]*themoviedb\.org\/(movie|tv)\/(\d+)[^"]*"[^>]*data-track-action="TMDb"/i);
-        if (linkMatch) return { type: linkMatch[1], id: parseInt(linkMatch[2]) };
+        if (linkMatch) { tmdbCache[uri] = { type: linkMatch[1], id: parseInt(linkMatch[2]) }; return tmdbCache[uri]; }
         
         const bodyMatch = res.body.match(/data-tmdb-id="(\d+)"/);
         const typeMatch = res.body.match(/data-tmdb-type="([^"]+)"/);
-        if (bodyMatch) return { type: (typeMatch ? typeMatch[1] : 'movie'), id: parseInt(bodyMatch[1]) };
+        if (bodyMatch) { tmdbCache[uri] = { type: (typeMatch ? typeMatch[1] : 'movie'), id: parseInt(bodyMatch[1]) }; return tmdbCache[uri]; }
+        
+        console.warn('[LB Import] No TMDB ID found on page:', uri);
       } catch (e) {
-         console.error('Failed fetching Letterboxd URI:', uri, e);
+         console.error('[LB Import] Failed fetching Letterboxd URI:', uri, e);
       }
       return null;
     };
@@ -1721,26 +1727,8 @@ const ImportExport = {
         if (progressCb) progressCb(c, t, 'Watched: ' + name);
         
         const tmdbData = await addMovie(uri, name, 'completed');
-        if (tmdbData) {
-          const rating = ratingMap[uri];
-          const hasDiary = Store.getDiary().some(d => d.tmdbId === tmdbData.id && d.type === tmdbData.type);
-          if (rating && !hasDiary) {
-            Store.addDiaryEntry({
-              tmdbId: tmdbData.id,
-              title: name,
-              type: tmdbData.type,
-              posterPath: null,
-              date: '',
-              action: 'watched',
-              notes: 'Imported from Letterboxd',
-              rating,
-              mood: null,
-              episodes: null,
-              season: null,
-              timestamp: new Date().toISOString()
-            });
-          }
-        }
+        // We do not add to diary here because watched.csv contains no dates
+        // and we only want explicitly logged items in the diary.
       }
     }
 
@@ -1770,18 +1758,29 @@ const ImportExport = {
       const ldI = h.indexOf('date');
       const wdI = h.indexOf('watched date');
 
+      console.log('[LB Import] Diary headers:', h);
+      console.log('[LB Import] Diary column indices — URI:', uI, 'Name:', nI, 'Rating:', rI, 'Date:', ldI, 'Watched Date:', wdI);
+      console.log('[LB Import] Diary rows:', diaryCSV.length - 1);
+
+      if (uI === -1) {
+        console.error('[LB Import] Could not find "Letterboxd URI" column in diary.csv! Headers:', h);
+      }
+
       for (let i = 1; i < diaryCSV.length; i++) {
         const row = diaryCSV[i];
-        const uri = row[uI];
-        const name = row[nI];
-        if (!uri) continue;
+        const uri = row[uI] ? row[uI].trim() : '';
+        const name = nI > -1 ? (row[nI] || '').trim() : '';
+        if (!uri) { console.warn('[LB Import] Diary row', i, 'has no URI, skipping'); continue; }
 
         c++;
         if (progressCb) progressCb(c, t, 'Diary: ' + name);
 
         let rating = null;
-        if (rI > -1 && row[rI]) rating = parseFloat(row[rI]) * 2;
-        else rating = ratingMap[uri] || null;
+        if (rI > -1 && row[rI]) {
+          const rv = parseFloat(row[rI]);
+          if (!isNaN(rv) && rv > 0) rating = rv * 2;
+        }
+        if (!rating) rating = ratingMap[uri] || null;
 
         const tmdbData = await getTmdbId(uri);
         if (tmdbData) {
@@ -1793,10 +1792,14 @@ const ImportExport = {
              else Store.updateTvShow(tmdbData.id, { watchStatus: 'completed' });
           }
 
-          let wDate = wdI > -1 ? row[wdI] : '';
-          let lDate = ldI > -1 ? row[ldI] : '';
+          let wDate = wdI > -1 ? (row[wdI] || '').trim() : '';
+          let lDate = ldI > -1 ? (row[ldI] || '').trim() : '';
           let date = wDate || lDate || '';
-          const action = (rwI > -1 && row[rwI] === 'Yes') ? 'rewatch' : 'watched';
+          const action = (rwI > -1 && (row[rwI] || '').trim() === 'Yes') ? 'rewatch' : 'watched';
+
+          // Get poster from store for the diary entry
+          const stored = tmdbData.type === 'movie' ? Store.getMovie(tmdbData.id) : Store.getTvShow(tmdbData.id);
+          const posterPath = stored ? stored.posterPath : null;
 
           const existingDiary = Store.getDiary().find(d => d.tmdbId === tmdbData.id && d.date === date && d.type === tmdbData.type);
           if (!existingDiary) {
@@ -1804,7 +1807,7 @@ const ImportExport = {
                tmdbId: tmdbData.id,
                title: name,
                type: tmdbData.type,
-               posterPath: null,
+               posterPath,
                date,
                action,
                notes: 'Letterboxd Diary Import',
@@ -1817,8 +1820,12 @@ const ImportExport = {
           } else if (rating && !existingDiary.rating) {
              Store.updateDiaryEntry(existingDiary.timestamp, { rating });
           }
+        } else {
+          console.warn('[LB Import] Diary: no TMDB match for', name, uri);
         }
       }
+    } else {
+      console.log('[LB Import] No diary.csv data found (diaryCSV length:', diaryCSV.length, ')');
     }
   },
 

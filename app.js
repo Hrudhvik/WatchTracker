@@ -366,6 +366,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     toast('All data cleared');
   });
 
+
   // ─── Data Management Accordion ───
   document.getElementById('dataToggle').addEventListener('click', () => {
     const panel = document.getElementById('dataPanel');

@@ -93,7 +93,11 @@ const DiaryUI = {
     const diary = Store.getDiary();
     const movies = Store.getMovies();
     const tvshows = Store.getTvShows();
-    let entries = [...diary];
+    let entries = [...diary].map(d => {
+      if (d.posterPath) return d;
+      const m = d.type === 'movie' ? movies.find(x => x.tmdbId === d.tmdbId) : tvshows.find(x => x.tmdbId === d.tmdbId);
+      return { ...d, posterPath: m ? m.posterPath : null };
+    });
 
     // Also include legacy endDate-based entries not already in diary
     const diaryKeys = new Set(diary.map(d => `${d.tmdbId}-${d.date}-${d.type}`));

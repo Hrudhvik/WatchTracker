@@ -4,6 +4,17 @@
 
 const Store = {
   _data: { apiKey: '', movies: [], tvshows: [], diary: [], activity: [], theme: null, popupPrefs: null },
+  _nextId: 1,
+
+  _assignIds() {
+    let maxId = 0;
+    [...this._data.movies, ...this._data.tvshows].forEach(item => { if (item._id && item._id > maxId) maxId = item._id; });
+    this._nextId = maxId + 1;
+    let changed = false;
+    this._data.movies.forEach(m => { if (!m._id) { m._id = this._nextId++; changed = true; } });
+    this._data.tvshows.forEach(t => { if (!t._id) { t._id = this._nextId++; changed = true; } });
+    if (changed) { this._saveMovies(); this._saveTvShows(); }
+  },
 
   async load() {
     return new Promise(resolve => {
@@ -15,6 +26,7 @@ const Store = {
         this._data.activity = d.activity || [];
         this._data.theme = d.theme || null;
         this._data.popupPrefs = d.popupPrefs || null;
+        this._assignIds();
         resolve(this._data);
       });
     });
@@ -33,6 +45,7 @@ const Store = {
   addMovie(item) {
     if (this._data.movies.find(m => m.tmdbId === item.tmdbId)) return false;
     if (item.malId && this._data.movies.find(m => m.malId === item.malId)) return false;
+    if (!item._id) item._id = this._nextId++;
     this._data.movies.unshift(item);
     this._saveMovies();
     return true;
@@ -58,6 +71,26 @@ const Store = {
     return this._data.movies.find(m => m.tmdbId === tmdbId);
   },
 
+  getById(id) {
+    return this._data.movies.find(m => m._id === id) || this._data.tvshows.find(t => t._id === id) || null;
+  },
+
+  getByIdType(id) {
+    const m = this._data.movies.find(m => m._id === id);
+    if (m) return { item: m, mediaType: 'movie' };
+    const t = this._data.tvshows.find(t => t._id === id);
+    if (t) return { item: t, mediaType: 'tv' };
+    return null;
+  },
+
+  removeById(id) {
+    const mi = this._data.movies.findIndex(m => m._id === id);
+    if (mi !== -1) { this._data.movies.splice(mi, 1); this._saveMovies(); return true; }
+    const ti = this._data.tvshows.findIndex(t => t._id === id);
+    if (ti !== -1) { this._data.tvshows.splice(ti, 1); this._saveTvShows(); return true; }
+    return false;
+  },
+
   _saveMovies() {
     chrome.storage.local.set({ movies: this._data.movies });
   },
@@ -68,6 +101,7 @@ const Store = {
   addTvShow(item) {
     if (this._data.tvshows.find(t => t.tmdbId === item.tmdbId)) return false;
     if (item.malId && this._data.tvshows.find(t => t.malId === item.malId)) return false;
+    if (!item._id) item._id = this._nextId++;
     this._data.tvshows.unshift(item);
     this._saveTvShows();
     return true;
@@ -142,6 +176,91 @@ const Store = {
     let activityChanged = false;
     this._data.activity.forEach(a => { if (a.tmdbId === oldId && a.type === type) { a.tmdbId = newId; activityChanged = true; } });
     if (activityChanged) chrome.storage.local.set({ activity: this._data.activity });
+  },
+
+  migrateType(id, oldType, newType) {
+    if (oldType === newType) return;
+    let item;
+    if (oldType === 'movie') {
+      const idx = this._data.movies.findIndex(m => m.tmdbId === id);
+      if (idx !== -1) { item = this._data.movies.splice(idx, 1)[0]; this._saveMovies(); }
+    } else {
+      const idx = this._data.tvshows.findIndex(t => t.tmdbId === id);
+      if (idx !== -1) { item = this._data.tvshows.splice(idx, 1)[0]; this._saveTvShows(); }
+    }
+    if (item) {
+      if (newType === 'movie') {
+        this._data.movies.unshift(item); this._saveMovies();
+      } else {
+        if (!item.seasons) item.seasons = [];
+        this._data.tvshows.unshift(item); this._saveTvShows();
+      }
+    }
+    let diaryChanged = false;
+    this._data.diary.forEach(d => { if (d.tmdbId === id && d.type === oldType) { d.type = newType; diaryChanged = true; } });
+    if (diaryChanged) chrome.storage.local.set({ diary: this._data.diary });
+    let activityChanged = false;
+    this._data.activity.forEach(a => { if (a.tmdbId === id && a.type === oldType) { a.type = newType; activityChanged = true; } });
+    if (activityChanged) chrome.storage.local.set({ activity: this._data.activity });
+  },
+
+  mergeItems(survivorId, survivorType, duplicateId, duplicateType, duplicate_id) {
+    const survivor = survivorType === 'movie' ? this.getMovie(survivorId) : this.getTvShow(survivorId);
+    // Use _id for precise lookup if provided (handles same-tmdbId duplicates)
+    let duplicate;
+    if (duplicate_id) {
+      duplicate = this.getById(duplicate_id);
+    } else {
+      duplicate = duplicateType === 'movie' ? this.getMovie(duplicateId) : this.getTvShow(duplicateId);
+    }
+    if (!survivor || !duplicate) return false;
+
+    // Transfer malId if survivor doesn't have one
+    if (!survivor.malId && duplicate.malId) {
+      if (survivorType === 'movie') this.updateMovie(survivorId, { malId: duplicate.malId });
+      else this.updateTvShow(survivorId, { malId: duplicate.malId });
+    }
+
+    // Transfer sourceTag (anime) if survivor doesn't have one
+    if (!survivor.sourceTag && duplicate.sourceTag) {
+      if (survivorType === 'movie') this.updateMovie(survivorId, { sourceTag: duplicate.sourceTag });
+      else this.updateTvShow(survivorId, { sourceTag: duplicate.sourceTag });
+    }
+
+    // Keep best watch status: completed > watching > on_hold > dropped > plan_to_watch
+    const statusRank = { completed: 5, watching: 4, on_hold: 3, dropped: 2, plan_to_watch: 1 };
+    if ((statusRank[duplicate.watchStatus] || 0) > (statusRank[survivor.watchStatus] || 0)) {
+      if (survivorType === 'movie') this.updateMovie(survivorId, { watchStatus: duplicate.watchStatus });
+      else this.updateTvShow(survivorId, { watchStatus: duplicate.watchStatus });
+    }
+
+    // Migrate diary entries
+    let diaryChanged = false;
+    this._data.diary.forEach(d => {
+      if (d.tmdbId === duplicateId && d.type === duplicateType) {
+        d.tmdbId = survivorId; d.type = survivorType; diaryChanged = true;
+      }
+    });
+    if (diaryChanged) chrome.storage.local.set({ diary: this._data.diary });
+
+    // Migrate activity
+    let actChanged = false;
+    this._data.activity.forEach(a => {
+      if (a.tmdbId === duplicateId && a.type === duplicateType) {
+        a.tmdbId = survivorId; a.type = survivorType; actChanged = true;
+      }
+    });
+    if (actChanged) chrome.storage.local.set({ activity: this._data.activity });
+
+    // Remove the duplicate by _id (precise, won't remove survivor even with same tmdbId)
+    if (duplicate._id) {
+      this.removeById(duplicate._id);
+    } else {
+      if (duplicateType === 'movie') this.removeMovie(duplicateId);
+      else this.removeTvShow(duplicateId);
+    }
+
+    return true;
   },
 
   // ─── Export/Import ───
