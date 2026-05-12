@@ -44,10 +44,12 @@ const TMDB = {
 
   // Image helpers
   poster(path, size = 'w342') {
-    return path ? `${TMDB_IMG}${size}${path}` : null;
+    if (!path) return null;
+    return path.startsWith('http') ? path : `${TMDB_IMG}${size}${path}`;
   },
   backdrop(path, size = 'w1280') {
-    return path ? `${TMDB_IMG}${size}${path}` : null;
+    if (!path) return null;
+    return path.startsWith('http') ? path : `${TMDB_IMG}${size}${path}`;
   },
   profile(path, size = 'w185') {
     return path ? `${TMDB_IMG}${size}${path}` : null;
