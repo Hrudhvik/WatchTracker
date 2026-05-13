@@ -252,7 +252,7 @@ function renderPopupDiary() {
 
   const movies = Store.getMovies();
   const tvshows = Store.getTvShows();
-  const actLabels = { completed:'Completed', rewatch:'Rewatched', watched:'Watched', watched_episodes:'Watched eps', started:'Started', session:'Session' };
+  const actLabels = { completed: 'Completed', rewatch: 'Rewatched', watched: 'Watched', watched_episodes: 'Watched eps', started: 'Started', session: 'Session' };
 
   // Enrich diary entries with poster fallback from store
   const enriched = diary.map(e => {
@@ -282,15 +282,15 @@ function renderPopupDiary() {
       const season = e.season ? ` · S${e.season}` : '';
 
       html += `<div class="pd-tl-entry" data-tmdb="${e.tmdbId}" data-type="${e.type}">
-        <div class="pd-tl-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">${e.type==='movie'?'MOV':'TV'}</div>`}</div>
+        <div class="pd-tl-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">${e.type === 'movie' ? 'MOV' : 'TV'}</div>`}</div>
         <div class="pd-tl-info">
           <div class="pd-tl-title">${esc(e.title)}</div>
           <div class="pd-tl-meta">${act}${season}${rating}</div>
-          ${e.notes ? `<div class="pd-tl-notes">${esc(e.notes).substring(0,60)}</div>` : ''}
+          ${e.notes ? `<div class="pd-tl-notes">${esc(e.notes).substring(0, 60)}</div>` : ''}
         </div>
         <div class="pd-tl-actions">
-          <button class="pd-tl-edit" data-ts="${e.timestamp||''}">Edit</button>
-          <button class="pd-tl-del" data-tmdb="${e.tmdbId}" data-ts="${e.timestamp||''}">Remove</button>
+          <button class="pd-tl-edit" data-ts="${e.timestamp || ''}">Edit</button>
+          <button class="pd-tl-del" data-tmdb="${e.tmdbId}" data-ts="${e.timestamp || ''}">Remove</button>
         </div>
       </div>`;
     });
@@ -345,14 +345,14 @@ function applyPopupTheme() {
   let p;
   if (t.preset) {
     const presets = {
-      default:  { bg0:'#0e1015', bg1:'#151820', bg2:'#1c2030', bg3:'#242a3a', accent:'#6c5ce7', accentL:'#a29bfe', text0:'#f0f2f5', text1:'#9ba0b5', text2:'#5c6180' },
-      midnight: { bg0:'#161b22', bg1:'#1c2129', bg2:'#21262d', bg3:'#30363d', accent:'#58a6ff', accentL:'#79c0ff', text0:'#e6edf3', text1:'#b1bac4', text2:'#6e7681' },
-      ocean:    { bg0:'#112240', bg1:'#162b50', bg2:'#1d3a6a', bg3:'#254980', accent:'#64ffda', accentL:'#88ffea', text0:'#e6f1ff', text1:'#a8c0d8', text2:'#607b96' },
-      forest:   { bg0:'#132413', bg1:'#1a2e1a', bg2:'#223b22', bg3:'#2d4a2d', accent:'#4ade80', accentL:'#86efac', text0:'#ecfdf5', text1:'#a7cfb0', text2:'#5c8a6a' },
-      sunset:   { bg0:'#2d1515', bg1:'#3a1e1e', bg2:'#4a2828', bg3:'#5c3535', accent:'#f97316', accentL:'#fb923c', text0:'#fef2f2', text1:'#d4a0a0', text2:'#8a5555' },
-      sakura:   { bg0:'#2a1525', bg1:'#351c30', bg2:'#42243d', bg3:'#522e4d', accent:'#f472b6', accentL:'#f9a8d4', text0:'#fdf2f8', text1:'#d4a0c0', text2:'#8a5578' },
-      nord:     { bg0:'#3b4252', bg1:'#434c5e', bg2:'#4c566a', bg3:'#5a6478', accent:'#88c0d0', accentL:'#8fbcbb', text0:'#eceff4', text1:'#d8dee9', text2:'#81a1c1' },
-      light:    { bg0:'#e8e8ed', bg1:'#dddde3', bg2:'#d0d0d8', bg3:'#c0c0cc', accent:'#6c5ce7', accentL:'#5a4bd4', text0:'#1a1a2e', text1:'#333355', text2:'#666688' },
+      default: { bg0: '#0e1015', bg1: '#151820', bg2: '#1c2030', bg3: '#242a3a', accent: '#6c5ce7', accentL: '#a29bfe', text0: '#f0f2f5', text1: '#9ba0b5', text2: '#5c6180' },
+      midnight: { bg0: '#161b22', bg1: '#1c2129', bg2: '#21262d', bg3: '#30363d', accent: '#58a6ff', accentL: '#79c0ff', text0: '#e6edf3', text1: '#b1bac4', text2: '#6e7681' },
+      ocean: { bg0: '#112240', bg1: '#162b50', bg2: '#1d3a6a', bg3: '#254980', accent: '#64ffda', accentL: '#88ffea', text0: '#e6f1ff', text1: '#a8c0d8', text2: '#607b96' },
+      forest: { bg0: '#132413', bg1: '#1a2e1a', bg2: '#223b22', bg3: '#2d4a2d', accent: '#4ade80', accentL: '#86efac', text0: '#ecfdf5', text1: '#a7cfb0', text2: '#5c8a6a' },
+      sunset: { bg0: '#2d1515', bg1: '#3a1e1e', bg2: '#4a2828', bg3: '#5c3535', accent: '#f97316', accentL: '#fb923c', text0: '#fef2f2', text1: '#d4a0a0', text2: '#8a5555' },
+      sakura: { bg0: '#2a1525', bg1: '#351c30', bg2: '#42243d', bg3: '#522e4d', accent: '#f472b6', accentL: '#f9a8d4', text0: '#fdf2f8', text1: '#d4a0c0', text2: '#8a5578' },
+      nord: { bg0: '#3b4252', bg1: '#434c5e', bg2: '#4c566a', bg3: '#5a6478', accent: '#88c0d0', accentL: '#8fbcbb', text0: '#eceff4', text1: '#d8dee9', text2: '#81a1c1' },
+      light: { bg0: '#e8e8ed', bg1: '#dddde3', bg2: '#d0d0d8', bg3: '#c0c0cc', accent: '#6c5ce7', accentL: '#5a4bd4', text0: '#1a1a2e', text1: '#333355', text2: '#666688' },
     };
     p = presets[t.preset];
   } else if (t.custom) {
@@ -383,10 +383,10 @@ function renderList() {
 
   const typePri = (i) => i.mediaType === 'tv' ? 0 : 1;
   switch (pSort) {
-    case 'title': items.sort((a,b) => a.title.localeCompare(b.title) || typePri(a) - typePri(b)); break;
-    case 'year': items.sort((a,b) => (b.year||0)-(a.year||0) || typePri(a) - typePri(b)); break;
-    case 'dateAdded': items.sort((a,b) => new Date(b.dateAdded)-new Date(a.dateAdded) || typePri(a) - typePri(b)); break;
-    default: items.sort((a,b) => new Date(b.dateUpdated||b.dateAdded)-new Date(a.dateUpdated||a.dateAdded) || typePri(a) - typePri(b));
+    case 'title': items.sort((a, b) => a.title.localeCompare(b.title) || typePri(a) - typePri(b)); break;
+    case 'year': items.sort((a, b) => (b.year || 0) - (a.year || 0) || typePri(a) - typePri(b)); break;
+    case 'dateAdded': items.sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded) || typePri(a) - typePri(b)); break;
+    default: items.sort((a, b) => new Date(b.dateUpdated || b.dateAdded) - new Date(a.dateUpdated || a.dateAdded) || typePri(a) - typePri(b));
   }
 
   const el = document.getElementById('pList');
@@ -394,14 +394,14 @@ function renderList() {
   if (!items.length) { el.innerHTML = ''; empty.classList.remove('hidden'); return; }
   empty.classList.add('hidden');
 
-  const fc = { watching:'fill-watching', completed:'fill-completed', plan_to_watch:'fill-plan', on_hold:'fill-hold', dropped:'fill-dropped' };
+  const fc = { watching: 'fill-watching', completed: 'fill-completed', plan_to_watch: 'fill-plan', on_hold: 'fill-hold', dropped: 'fill-dropped' };
 
   if (pView === 'grid') {
     el.innerHTML = `<div class="p-grid">${items.map(i => {
       const img = TMDB.poster(i.posterPath, 'w185');
       const pct = getPct(i); const f = fc[i.watchStatus] || 'fill-plan';
       return `<div class="p-grid-card" data-tmdb="${i.tmdbId}" data-type="${i.mediaType}">
-        <div class="p-grid-poster">${img ? `<img src="${img}">` : `<div class="p-poster-ph">${i.mediaType==='movie'?'MOV':'TV'}</div>`}
+        <div class="p-grid-poster">${img ? `<img src="${img}">` : `<div class="p-poster-ph">${i.mediaType === 'movie' ? 'MOV' : 'TV'}</div>`}
           <div class="p-grid-bar"><div class="p-grid-bar-fill ${f}" style="width:${pct}%"></div></div>
         </div><div class="p-grid-title">${esc(i.title)}</div></div>`;
     }).join('')}</div>`;
@@ -411,9 +411,9 @@ function renderList() {
       const pct = getPct(i); const f = fc[i.watchStatus] || 'fill-plan';
       const eps = getEps(i); const score = i.voteAverage ? i.voteAverage.toFixed(1) : '';
       return `<div class="p-item" data-tmdb="${i.tmdbId}" data-type="${i.mediaType}">
-        <div class="p-poster">${img ? `<img src="${img}">` : `<div class="p-poster-ph">${i.mediaType==='movie'?'MOV':'TV'}</div>`}</div>
+        <div class="p-poster">${img ? `<img src="${img}">` : `<div class="p-poster-ph">${i.mediaType === 'movie' ? 'MOV' : 'TV'}</div>`}</div>
         <div class="p-info"><div class="p-title">${esc(i.title)}</div>
-          <div class="p-meta">${i.mediaType==='movie'?'Movie':'TV'} · ${i.year||''}</div>
+          <div class="p-meta">${i.mediaType === 'movie' ? 'Movie' : 'TV'} · ${i.year || ''}</div>
           <div class="p-bar-wrap"><div class="p-bar"><div class="p-bar-fill ${f}" style="width:${pct}%"></div></div></div></div>
         <div class="p-right">${eps ? `<div class="p-eps">${eps}</div>` : ''}${score ? `<div class="p-score">${score}</div>` : ''}</div></div>`;
     }).join('');
@@ -444,7 +444,7 @@ function buildStatusDropdownHTML(currentVal, idPrefix) {
       <span class="p-dd-arrow">&#9662;</span>
     </div>
     <div class="pd-dd-menu hidden" id="${idPrefix}Menu">
-      ${entries.map(e => `<div class="p-dd-item ${e.val===currentVal?'active':''}" data-val="${e.val}"><span class="p-dd-dot" style="background:${e.color}"></span>${e.label}</div>`).join('')}
+      ${entries.map(e => `<div class="p-dd-item ${e.val === currentVal ? 'active' : ''}" data-val="${e.val}"><span class="p-dd-dot" style="background:${e.color}"></span>${e.label}</div>`).join('')}
     </div>
   </div>`;
 }
@@ -465,7 +465,7 @@ function bindDetailStatusDD(idPrefix, tmdbId, mediaType, title, posterPath) {
   menu.querySelectorAll('.p-dd-item').forEach(item => {
     item.addEventListener('click', () => {
       const val = item.dataset.val;
-      const cfg = { watching:{l:'Watching',c:'#00b894'}, completed:{l:'Completed',c:'#6c5ce7'}, on_hold:{l:'On-Hold',c:'#fdcb6e'}, dropped:{l:'Dropped',c:'#e17055'}, plan_to_watch:{l:'Plan to Watch',c:'#a29bfe'} };
+      const cfg = { watching: { l: 'Watching', c: '#00b894' }, completed: { l: 'Completed', c: '#6c5ce7' }, on_hold: { l: 'On-Hold', c: '#fdcb6e' }, dropped: { l: 'Dropped', c: '#e17055' }, plan_to_watch: { l: 'Plan to Watch', c: '#a29bfe' } };
       const c = cfg[val] || cfg.watching;
       document.getElementById(`${idPrefix}Label`).textContent = c.l;
       document.getElementById(`${idPrefix}Dot`).style.background = c.c;
@@ -480,7 +480,7 @@ function bindDetailStatusDD(idPrefix, tmdbId, mediaType, title, posterPath) {
   });
 }
 
-function showDetail(tmdbId, mediaType) {
+async function showDetail(tmdbId, mediaType) {
   pMode = 'detail';
   document.getElementById('pBack').classList.remove('hidden');
   document.getElementById('pControls').classList.add('hidden');
@@ -509,6 +509,8 @@ function showDetail(tmdbId, mediaType) {
 
   if (!stored) { showTMDBDetail(tmdbId, mediaType); return; }
 
+  el.innerHTML = '<div class="p-search-msg">Loading...</div>';
+
   const poster = TMDB.poster(stored.posterPath, 'w185');
   const genres = (stored.genres || []).slice(0, 4);
   const score = stored.voteAverage ? stored.voteAverage.toFixed(1) : '—';
@@ -517,32 +519,57 @@ function showDetail(tmdbId, mediaType) {
   let seasonHtml = '';
   if (!isM) {
     const ss = stored.seasons || [];
-    const totalEps = ss.reduce((s,x) => s + (x.episodeCount||0), 0);
-    const watchedEps = ss.reduce((s,x) => s + (x.episodesWatched||0), 0);
+    const totalEps = ss.reduce((s, x) => s + (x.episodeCount || 0), 0);
+    const watchedEps = ss.reduce((s, x) => s + (x.episodesWatched || 0), 0);
     seasonHtml = `<div class="pd-section"><div class="pd-section-label">Episode Progress (${watchedEps}/${totalEps})</div>
       ${ss.map(s => {
-        const w = s.episodesWatched||0, t = s.episodeCount||0;
-        const pct = t > 0 ? Math.round(w/t*100) : 0;
-        return `<div class="pd-ep-row"><span class="pd-ep-label">S${s.seasonNumber} (${t} eps)</span>
+      const w = s.episodesWatched || 0, t = s.episodeCount || 0;
+      const pct = t > 0 ? Math.round(w / t * 100) : 0;
+      return `<div class="pd-ep-row"><span class="pd-ep-label">S${s.seasonNumber} (${t} eps)</span>
           <div class="pd-ep-counter"><button class="pd-ep-btn" data-sn="${s.seasonNumber}" data-act="dec">-</button>
             <div class="pd-ep-val">${w}/${t}</div>
             <button class="pd-ep-btn" data-sn="${s.seasonNumber}" data-act="inc">+</button></div>
         </div><div class="pd-season-bar"><div class="pd-season-bar-fill" style="width:${pct}%"></div></div>`;
-      }).join('')}</div>`;
+    }).join('')}</div>`;
   }
 
   let movieInfo;
   if (isM) {
-    const rt = stored.runtime ? `${Math.floor(stored.runtime/60)}h ${stored.runtime%60}m` : '';
+    const rt = stored.runtime ? `${Math.floor(stored.runtime / 60)}h ${stored.runtime % 60}m` : '';
     movieInfo = [stored.year, rt].filter(Boolean).join(' · ');
   } else {
     const ss = stored.seasons || [];
-    movieInfo = [stored.year, `${stored.totalSeasons||ss.length} Seasons`, `${stored.totalEpisodes||'?'} Eps`].filter(Boolean).join(' · ');
+    movieInfo = [stored.year, `${stored.totalSeasons || ss.length} Seasons`, `${stored.totalEpisodes || '?'} Eps`].filter(Boolean).join(' · ');
+  }
+
+  // Fetch extra details (overview, cast, imdbId) from TMDB if available
+  let overview = '';
+  let imdbId = stored.imdbId || null;
+  let castHtml = '';
+  if (TMDB.getKey() && tmdbId > 0) {
+    try {
+      const d = isM ? await TMDB.movieDetails(tmdbId) : await TMDB.tvDetails(tmdbId);
+      overview = (d.overview || '').substring(0, 250) + ((d.overview || '').length > 250 ? '...' : '');
+      if (!imdbId) {
+        imdbId = isM ? (d.imdb_id || null) : (d.external_ids?.imdb_id || null);
+        if (imdbId) {
+          if (isM) Store.updateMovie(tmdbId, { imdbId });
+          else Store.updateTvShow(tmdbId, { imdbId });
+        }
+      }
+      const cast = (d.credits?.cast || []).slice(0, 6);
+      if (cast.length) {
+        castHtml = `<div class="pd-section"><div class="pd-section-label">Cast</div><div class="pd-cast-row">${cast.map(c => {
+          const ph = TMDB.profile(c.profile_path, 'w92');
+          return `<div class="pd-cast-card">${ph ? `<img src="${ph}" class="pd-cast-img">` : `<div class="pd-cast-ph"></div>`}<div class="pd-cast-name">${esc(c.name)}</div><div class="pd-cast-char">${esc(c.character || '')}</div></div>`;
+        }).join('')}</div></div>`;
+      }
+    } catch (e) { /* non-fatal, just skip extras */ }
   }
 
   el.innerHTML = `<div class="pd-wrap">
     <div class="pd-hero">
-      <div class="pd-poster">${poster ? `<img src="${poster}">` : `<div class="pd-poster-ph">${isM?'MOV':'TV'}</div>`}</div>
+      <div class="pd-poster">${poster ? `<img src="${poster}">` : `<div class="pd-poster-ph">${isM ? 'MOV' : 'TV'}</div>`}</div>
       <div class="pd-info">
         <div class="pd-title">${esc(stored.title)}</div>
         <div class="pd-sub">${movieInfo}</div>
@@ -551,8 +578,15 @@ function showDetail(tmdbId, mediaType) {
           <div><div class="pd-stat-val gold">${score}</div><div class="pd-stat-label">${scoreLabel}</div></div>
           ${stored.rewatchCount ? `<div><div class="pd-stat-val">${stored.rewatchCount}</div><div class="pd-stat-label">Rewatches</div></div>` : ''}
         </div>
+        <div class="pd-links">
+          <a href="https://www.themoviedb.org/${isM ? 'movie' : 'tv'}/${Math.abs(tmdbId)}" target="_blank">&#8599; TMDB</a>
+          ${imdbId ? `<a href="https://www.imdb.com/title/${imdbId}" target="_blank">&#8599; IMDb</a>` : ''}
+          ${stored.malId ? `<a href="https://myanimelist.net/anime/${stored.malId}" target="_blank">&#8599; MAL</a>` : ''}
+        </div>
       </div>
     </div>
+    ${overview ? `<div class="pd-overview">${esc(overview)}</div>` : ''}
+    ${castHtml}
     <div class="pd-section"><div class="pd-section-label">Status</div>
       ${buildStatusDropdownHTML(stored.watchStatus, 'pdSt')}
     </div>
@@ -578,7 +612,7 @@ function showDetail(tmdbId, mediaType) {
       if (act === 'inc' && s.episodesWatched < t) s.episodesWatched++;
       else if (act === 'dec' && s.episodesWatched > 0) s.episodesWatched--;
       else return;
-      const allDone = ss.every(x => x.episodesWatched >= (x.episodeCount||0) && (x.episodeCount||0) > 0);
+      const allDone = ss.every(x => x.episodesWatched >= (x.episodeCount || 0) && (x.episodeCount || 0) > 0);
       const anyStarted = ss.some(x => x.episodesWatched > 0);
       let ns = show.watchStatus;
       if (allDone) ns = 'completed';
@@ -616,7 +650,7 @@ async function searchTMDB(query) {
   try {
     const results = await TMDB.search(query);
     if (!results.length) { el.innerHTML = '<div class="p-search-msg">No results found</div>'; return; }
-    results.sort((a,b) => (a.media_type === 'tv' ? 0 : 1) - (b.media_type === 'tv' ? 0 : 1));
+    results.sort((a, b) => (a.media_type === 'tv' ? 0 : 1) - (b.media_type === 'tv' ? 0 : 1));
 
     el.innerHTML = results.slice(0, 12).map(r => {
       const isM = r.media_type === 'movie';
@@ -625,10 +659,10 @@ async function searchTMDB(query) {
       const poster = TMDB.poster(r.poster_path, 'w92');
       const inList = isM ? Store.hasMovie(r.id) : Store.hasTvShow(r.id);
       return `<div class="p-search-item" data-id="${r.id}" data-type="${r.media_type}">
-        <div class="p-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">${isM?'MOV':'TV'}</div>`}</div>
+        <div class="p-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">${isM ? 'MOV' : 'TV'}</div>`}</div>
         <div class="p-search-info"><div class="p-search-title">${esc(title)}</div>
           <div class="p-search-sub">${yr}${r.vote_average ? ` · ${r.vote_average.toFixed(1)}` : ''}</div></div>
-        <span class="p-search-type p-search-type-${isM?'movie':'tv'}">${isM?'Movie':'TV'}</span>
+        <span class="p-search-type p-search-type-${isM ? 'movie' : 'tv'}">${isM ? 'Movie' : 'TV'}</span>
         ${inList ? `<button class="p-add-btn added" disabled>Added</button>` : `<button class="p-add-btn" data-action="add">+ Add</button>`}
       </div>`;
     }).join('');
@@ -643,12 +677,12 @@ async function searchTMDB(query) {
           try {
             if (type === 'movie') {
               const d = await TMDB.movieDetails(id);
-              Store.addMovie({ tmdbId: d.id, title: d.title, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.release_date||'').substring(0,4))||0, voteAverage: d.vote_average||0, runtime: d.runtime||0, genres: (d.genres||[]).map(g=>g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
+              Store.addMovie({ tmdbId: d.id, title: d.title, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.release_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, runtime: d.runtime || 0, genres: (d.genres || []).map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
               Store.addActivity({ tmdbId: d.id, title: d.title, type: 'movie', posterPath: d.poster_path, action: 'added', detail: 'Added from popup', timestamp: new Date().toISOString() });
             } else {
               const d = await TMDB.tvDetails(id);
-              const ss = (d.seasons||[]).filter(s => s.season_number > 0);
-              Store.addTvShow({ tmdbId: d.id, title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.first_air_date||'').substring(0,4))||0, voteAverage: d.vote_average||0, totalSeasons: d.number_of_seasons||0, totalEpisodes: d.number_of_episodes||0, genres: (d.genres||[]).map(g=>g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', seasons: ss.map(s=>({seasonNumber:s.season_number,episodeCount:s.episode_count||0,episodesWatched:0,posterPath:s.poster_path})), dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
+              const ss = (d.seasons || []).filter(s => s.season_number > 0);
+              Store.addTvShow({ tmdbId: d.id, title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.first_air_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: (d.genres || []).map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', seasons: ss.map(s => ({ seasonNumber: s.season_number, episodeCount: s.episode_count || 0, episodesWatched: 0, posterPath: s.poster_path })), dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
               Store.addActivity({ tmdbId: d.id, title: d.name, type: 'tv', posterPath: d.poster_path, action: 'added', detail: 'Added from popup', timestamp: new Date().toISOString() });
             }
             addBtn.textContent = 'Added'; addBtn.classList.add('added');
@@ -682,15 +716,22 @@ async function showTMDBDetail(tmdbId, mediaType) {
     const poster = TMDB.poster(d.poster_path, 'w185');
     const genres = (d.genres || []).slice(0, 4);
     const score = d.vote_average ? d.vote_average.toFixed(1) : '—';
-    const overview = (d.overview || '').substring(0, 200) + ((d.overview || '').length > 200 ? '...' : '');
+    const overview = (d.overview || '').substring(0, 250) + ((d.overview || '').length > 250 ? '...' : '');
     const inList = isM ? Store.hasMovie(d.id) : Store.hasTvShow(d.id);
+    const imdbId = isM ? (d.imdb_id || null) : (d.external_ids?.imdb_id || null);
     const subInfo = isM
-      ? [year, d.runtime ? `${Math.floor(d.runtime/60)}h ${d.runtime%60}m` : '', d.status].filter(Boolean).join(' · ')
-      : [year, `${d.number_of_seasons||'?'} Seasons`, `${d.number_of_episodes||'?'} Eps`, d.status].filter(Boolean).join(' · ');
+      ? [year, d.runtime ? `${Math.floor(d.runtime / 60)}h ${d.runtime % 60}m` : '', d.status].filter(Boolean).join(' · ')
+      : [year, `${d.number_of_seasons || '?'} Seasons`, `${d.number_of_episodes || '?'} Eps`, d.status].filter(Boolean).join(' · ');
+
+    const cast = (d.credits?.cast || []).slice(0, 6);
+    const castHtml = cast.length ? `<div class="pd-section"><div class="pd-section-label">Cast</div><div class="pd-cast-row">${cast.map(c => {
+      const ph = TMDB.profile(c.profile_path, 'w92');
+      return `<div class="pd-cast-card">${ph ? `<img src="${ph}" class="pd-cast-img">` : `<div class="pd-cast-ph"></div>`}<div class="pd-cast-name">${esc(c.name)}</div><div class="pd-cast-char">${esc(c.character || '')}</div></div>`;
+    }).join('')}</div></div>` : '';
 
     el.innerHTML = `<div class="pd-wrap">
       <div class="pd-hero">
-        <div class="pd-poster">${poster ? `<img src="${poster}">` : `<div class="pd-poster-ph">${isM?'MOV':'TV'}</div>`}</div>
+        <div class="pd-poster">${poster ? `<img src="${poster}">` : `<div class="pd-poster-ph">${isM ? 'MOV' : 'TV'}</div>`}</div>
         <div class="pd-info">
           <div class="pd-title">${esc(title)}</div>
           <div class="pd-sub">${subInfo}</div>
@@ -702,9 +743,14 @@ async function showTMDBDetail(tmdbId, mediaType) {
         </div>
       </div>
       ${overview ? `<div class="pd-overview">${esc(overview)}</div>` : ''}
+      ${castHtml}
       <div class="pd-actions">
         ${inList ? `<button class="pd-btn pd-btn-open" id="pdOpenFull">View in Dashboard</button>`
-                 : `<button class="pd-btn pd-btn-add" id="pdAdd">+ Add to List</button>`}
+        : `<button class="pd-btn pd-btn-add" id="pdAdd">+ Add to List</button>`}
+      </div>
+      <div class="pd-links">
+        <a href="https://www.themoviedb.org/${isM ? 'movie' : 'tv'}/${d.id}" target="_blank">&#8599; TMDB</a>
+        ${imdbId ? `<a href="https://www.imdb.com/title/${imdbId}" target="_blank">&#8599; IMDb</a>` : ''}
       </div>
     </div>`;
 
@@ -712,8 +758,8 @@ async function showTMDBDetail(tmdbId, mediaType) {
       el.querySelector('#pdAdd').addEventListener('click', async () => {
         const btn = el.querySelector('#pdAdd'); btn.textContent = 'Adding...'; btn.disabled = true;
         try {
-          if (isM) Store.addMovie({ tmdbId: d.id, title: d.title, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt(year)||0, voteAverage: d.vote_average||0, runtime: d.runtime||0, genres: genres.map(g=>g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
-          else { const ss = (d.seasons||[]).filter(s => s.season_number > 0); Store.addTvShow({ tmdbId: d.id, title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt(year)||0, voteAverage: d.vote_average||0, totalSeasons: d.number_of_seasons||0, totalEpisodes: d.number_of_episodes||0, genres: genres.map(g=>g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', seasons: ss.map(s=>({seasonNumber:s.season_number,episodeCount:s.episode_count||0,episodesWatched:0,posterPath:s.poster_path})), dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() }); }
+          if (isM) Store.addMovie({ tmdbId: d.id, title: d.title, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt(year) || 0, voteAverage: d.vote_average || 0, runtime: d.runtime || 0, genres: genres.map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
+          else { const ss = (d.seasons || []).filter(s => s.season_number > 0); Store.addTvShow({ tmdbId: d.id, title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt(year) || 0, voteAverage: d.vote_average || 0, totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: genres.map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', seasons: ss.map(s => ({ seasonNumber: s.season_number, episodeCount: s.episode_count || 0, episodesWatched: 0, posterPath: s.poster_path })), dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() }); }
           Store.addActivity({ tmdbId: d.id, title, type: mediaType, posterPath: d.poster_path, action: 'added', detail: 'Added from popup', timestamp: new Date().toISOString() });
           showDetail(d.id, mediaType);
         } catch (err) { btn.textContent = 'Error'; }
@@ -737,23 +783,23 @@ function popupDiaryLogModal(tmdbId, mediaType, title, posterPath) {
   const poster = TMDB.poster(posterPath, 'w185');
   const isM = mediaType === 'movie';
   const st = isM ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
-  const sOpts = !isM && st ? (st.seasons||[]).map(s => `<option value="${s.seasonNumber}">S${s.seasonNumber}</option>`).join('') : '';
+  const sOpts = !isM && st ? (st.seasons || []).map(s => `<option value="${s.seasonNumber}">S${s.seasonNumber}</option>`).join('') : '';
 
   // History
   const entries = Store.getDiary().filter(d => d.tmdbId === tmdbId && d.type === mediaType);
-  const aL = { completed:'Completed', rewatch:'Rewatched', watched:'Watched', watched_episodes:'Watched eps', started:'Started', session:'Session' };
+  const aL = { completed: 'Completed', rewatch: 'Rewatched', watched: 'Watched', watched_episodes: 'Watched eps', started: 'Started', session: 'Session' };
   const histHtml = entries.length ? `<div class="pdl-hist"><div class="pdl-hist-head">Diary History (${entries.length})</div>${entries.map(de => {
-    const a = aL[de.action]||de.action; const r = de.rating ? ` · ★${de.rating}` : ''; const s = de.season ? ` · S${de.season}` : '';
-    return `<div class="pdl-hrow"><div class="pdl-hinfo"><span class="pdl-hdate">${de.date||'—'}</span> <span class="pdl-hact">${a}${s}${r}</span></div><button class="pdl-hedit" data-ts="${de.timestamp}">Edit</button><button class="pdl-hdel" data-tmdb="${de.tmdbId}" data-ts="${de.timestamp}">Remove</button></div>`;
+    const a = aL[de.action] || de.action; const r = de.rating ? ` · ★${de.rating}` : ''; const s = de.season ? ` · S${de.season}` : '';
+    return `<div class="pdl-hrow"><div class="pdl-hinfo"><span class="pdl-hdate">${de.date || '—'}</span> <span class="pdl-hact">${a}${s}${r}</span></div><button class="pdl-hedit" data-ts="${de.timestamp}">Edit</button><button class="pdl-hdel" data-tmdb="${de.tmdbId}" data-ts="${de.timestamp}">Remove</button></div>`;
   }).join('')}</div>` : '';
 
   const html = `<div class="pdl-overlay" id="pdlModal"><div class="pdl-box"><div class="pdl-header"><span>Log Diary</span><button class="pdl-close" id="pdlX">&#10005;</button></div><div class="pdl-body">
-    <div class="pdl-hero"><div class="pdl-poster">${poster?`<img src="${poster}">`:`<div class="p-poster-ph">${isM?'MOV':'TV'}</div>`}</div><div><div class="pdl-name">${esc(title)}</div></div></div>
+    <div class="pdl-hero"><div class="pdl-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">${isM ? 'MOV' : 'TV'}</div>`}</div><div><div class="pdl-name">${esc(title)}</div></div></div>
     <div class="pdl-form">
       <div class="pdl-row"><label>Date</label><input type="date" id="pdlDate" value="${today}" class="pdl-inp"></div>
       <div class="pdl-row2">
         <div class="pdl-row" style="flex:1;"><label>Action</label><select id="pdlAction" class="pdl-inp"><option value="watched">Watched</option><option value="rewatch">Rewatched</option></select></div>
-        <div class="pdl-row" style="flex:1;"><label>Rating</label><select id="pdlRating" class="pdl-inp"><option value="0">— None —</option>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}">★ ${n}/10</option>`).join('')}</select></div>
+        <div class="pdl-row" style="flex:1;"><label>Rating</label><select id="pdlRating" class="pdl-inp"><option value="0">— None —</option>${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<option value="${n}">★ ${n}/10</option>`).join('')}</select></div>
       </div>
       ${!isM ? `<div class="pdl-row"><label>Season</label><select id="pdlSeason" class="pdl-inp"><option value="">All</option>${sOpts}</select></div>` : ''}
       <div class="pdl-row"><label>Notes</label><textarea id="pdlNotes" class="pdl-inp pdl-ta" rows="2" placeholder="Quick thoughts..."></textarea></div>
@@ -790,12 +836,12 @@ function popupEditDiaryEntry(timestamp) {
   const isM = entry.type === 'movie';
 
   const html = `<div class="pdl-overlay" id="pdleModal"><div class="pdl-box"><div class="pdl-header"><span>Edit Entry</span><button class="pdl-close" id="pdleX">&#10005;</button></div><div class="pdl-body"><div class="pdl-form">
-    <div class="pdl-row"><label>Date</label><input type="date" id="pdleDate" value="${entry.date||''}" class="pdl-inp"></div>
+    <div class="pdl-row"><label>Date</label><input type="date" id="pdleDate" value="${entry.date || ''}" class="pdl-inp"></div>
     <div class="pdl-row2">
-      <div class="pdl-row" style="flex:1;"><label>Action</label><select id="pdleAction" class="pdl-inp"><option value="watched" ${entry.action==='watched'?'selected':''}>Watched</option><option value="rewatch" ${entry.action==='rewatch'?'selected':''}>Rewatched</option></select></div>
-      <div class="pdl-row" style="flex:1;"><label>Rating</label><select id="pdleRating" class="pdl-inp"><option value="0">— None —</option>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}" ${entry.rating===n?'selected':''}>★ ${n}/10</option>`).join('')}</select></div>
+      <div class="pdl-row" style="flex:1;"><label>Action</label><select id="pdleAction" class="pdl-inp"><option value="watched" ${entry.action === 'watched' ? 'selected' : ''}>Watched</option><option value="rewatch" ${entry.action === 'rewatch' ? 'selected' : ''}>Rewatched</option></select></div>
+      <div class="pdl-row" style="flex:1;"><label>Rating</label><select id="pdleRating" class="pdl-inp"><option value="0">— None —</option>${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<option value="${n}" ${entry.rating === n ? 'selected' : ''}>★ ${n}/10</option>`).join('')}</select></div>
     </div>
-    <div class="pdl-row"><label>Notes</label><textarea id="pdleNotes" class="pdl-inp pdl-ta" rows="2">${esc(entry.notes||'')}</textarea></div>
+    <div class="pdl-row"><label>Notes</label><textarea id="pdleNotes" class="pdl-inp pdl-ta" rows="2">${esc(entry.notes || '')}</textarea></div>
     <div style="display:flex;gap:6px;"><button class="pdl-save" id="pdleSave" style="flex:1;">Save</button><button class="pdl-back" id="pdleBack">Back</button></div>
   </div></div></div></div>`;
 
@@ -820,16 +866,16 @@ function popupEditDiaryEntry(timestamp) {
 /* ─── Helpers ─── */
 function getPct(i) {
   if (i.mediaType === 'tv') {
-    const ss = i.seasons || []; const w = ss.reduce((s,se)=>s+(se.episodesWatched||0),0);
-    const t = ss.reduce((s,se)=>s+(se.episodeCount||0),0);
-    return t > 0 ? Math.round(w/t*100) : 0;
+    const ss = i.seasons || []; const w = ss.reduce((s, se) => s + (se.episodesWatched || 0), 0);
+    const t = ss.reduce((s, se) => s + (se.episodeCount || 0), 0);
+    return t > 0 ? Math.round(w / t * 100) : 0;
   }
   return i.watchStatus === 'completed' ? 100 : i.watchStatus === 'watching' ? 40 : 0;
 }
 function getEps(i) {
   if (i.mediaType !== 'tv') return '';
-  const ss = i.seasons || []; const w = ss.reduce((s,se)=>s+(se.episodesWatched||0),0);
-  const t = ss.reduce((s,se)=>s+(se.episodeCount||0),0);
-  return `${w}<span class="p-eps-total">/${t||'?'}</span>`;
+  const ss = i.seasons || []; const w = ss.reduce((s, se) => s + (se.episodesWatched || 0), 0);
+  const t = ss.reduce((s, se) => s + (se.episodeCount || 0), 0);
+  return `${w}<span class="p-eps-total">/${t || '?'}</span>`;
 }
-function esc(s) { if(!s) return ''; const e=document.createElement('span'); e.textContent=s; return e.innerHTML; }
+function esc(s) { if (!s) return ''; const e = document.createElement('span'); e.textContent = s; return e.innerHTML; }

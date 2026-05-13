@@ -152,7 +152,7 @@ const Store = {
   getAvgUserRating(id, t) { const e = this._data.diary.filter(d => d.tmdbId === id && d.type === t && d.rating); return e.length ? e.reduce((s, d) => s + d.rating, 0) / e.length : null; },
 
   getActivity() { return this._data.activity; },
-  addActivity(entry) { this._data.activity.unshift(entry); if (this._data.activity.length > 100) this._data.activity = this._data.activity.slice(0, 100); chrome.storage.local.set({ activity: this._data.activity }); },
+  addActivity(entry) { this._data.activity.unshift(entry); chrome.storage.local.set({ activity: this._data.activity }); },
 
   getAll() { return [...this._data.movies.map(m => ({ ...m, mediaType: 'movie' })), ...this._data.tvshows.map(t => ({ ...t, mediaType: 'tv' }))]; },
   deleteMovie(id) { this.removeMovie(id); },
@@ -364,7 +364,7 @@ const Store = {
             this._data.activity.unshift(a);
           }
         });
-        this._data.activity = this._data.activity.slice(0, 200);
+        // No activity cap — unlimitedStorage enabled
       }
     }
     this._saveMovies();

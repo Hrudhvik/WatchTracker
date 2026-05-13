@@ -22,13 +22,42 @@ function toast(msg) {
 }
 
 const App = {
+  _pages: ['movies', 'tvshows', 'lists', 'diary', 'profile', 'activity'],
+
+  navigate(pageId) {
+    if (!this._pages.includes(pageId)) pageId = 'movies';
+    this._pages.forEach(p => {
+      document.getElementById('page-' + p).classList.remove('active');
+      const navBtn = document.getElementById('nav-' + p);
+      if (navBtn) navBtn.classList.remove('active');
+    });
+
+    document.getElementById('page-' + pageId).classList.add('active');
+    const activeNav = document.getElementById('nav-' + pageId);
+    if (activeNav) activeNav.classList.add('active');
+    this.currentView = pageId;
+
+    if (pageId === 'movies') MoviesUI.render();
+    else if (pageId === 'tvshows') TvShowsUI.render();
+    else if (pageId === 'lists') ListUI.render();
+    else if (pageId === 'diary') DiaryUI.render();
+    else if (pageId === 'profile') ProfileUI.render();
+    else if (pageId === 'activity') ActivityUI.render();
+    
+    // Auto-scroll to top when navigating pages
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  },
   showPage(name) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active-page'));
     const page = document.getElementById(`page-${name}`);
-    if (page) page.classList.add('active-page');
+    if (page) {
+      page.classList.add('active-page');
+      page.scrollTop = 0;
+    }
     if (name === 'watchlist') ListUI.render();
     else if (name === 'profile') ProfileUI.render();
     else if (name === 'diary') DiaryUI.render();
+    else if (name === 'activity') ActivityUI.render();
   },
   refreshCounts() {
     const total = Store.getMovies().length + Store.getTvShows().length;

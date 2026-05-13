@@ -849,6 +849,12 @@ const SyncEngine = {
         const updates = { dateUpdated: new Date().toISOString(), syncSource: entry.source };
         if (entry.watchStatus) updates.watchStatus = entry.watchStatus;
         if (poster) updates.posterPath = poster;
+        
+        const existingMedia = isMovie ? Store.getMovie(storeId) : Store.getTvShow(storeId);
+        if (existingMedia && entry.timesWatched !== undefined && entry.timesWatched > (existingMedia.rewatchCount || 0)) {
+          updates.rewatchCount = entry.timesWatched;
+        }
+        
         if (isMovie) Store.updateMovie(storeId, updates);
         else Store.updateTvShow(storeId, updates);
         updated++;
@@ -864,20 +870,46 @@ const SyncEngine = {
           (d.tmdbId === storeId || (d.title || '').toLowerCase() === entryTitle)
         );
         if (!existingDiary) {
-          Store.addDiaryEntry({
+          const actionText = entry.isRewatch ? 'rewatch' : 'watched';
+          const newEntry = {
             tmdbId: storeId,
             title: entry.tmdbTitle || entry.title,
             type: isMovie ? 'movie' : 'tv',
             posterPath: poster,
             date: entry.watchDate,
-            action: entry.isRewatch ? 'rewatch' : 'watched',
+            action: actionText,
             notes: 'Synced from ' + entry.source,
             rating: effectiveRating,
             mood: null, episodes: null, season: null,
             timestamp: new Date().toISOString(),
             syncSource: entry.source,
+          };
+          Store.addDiaryEntry(newEntry);
+          Store.addActivity({
+            tmdbId: storeId,
+            title: entry.tmdbTitle || entry.title,
+            type: isMovie ? 'movie' : 'tv',
+            posterPath: poster,
+            action: actionText,
+            detail: entry.isRewatch ? 'Marked as completed - Rewatch' : 'Marked as completed',
+            timestamp: new Date().toISOString()
           });
           diaryAdded++;
+          
+          if (entry.isRewatch) {
+            const existingMedia = isMovie ? Store.getMovie(storeId) : Store.getTvShow(storeId);
+            if (existingMedia) {
+              const newCount = (existingMedia.rewatchCount || 0) + 1;
+              const history = existingMedia.rewatchHistory || [];
+              // Prevent duplicate history entries for the same date
+              if (!history.some(h => h.date === entry.watchDate)) {
+                history.push({ date: entry.watchDate, note: 'Synced rewatch' });
+                const rwUpdates = { rewatchCount: newCount, rewatchHistory: history };
+                if (isMovie) Store.updateMovie(storeId, rwUpdates);
+                else Store.updateTvShow(storeId, rwUpdates);
+              }
+            }
+          }
         } else if (isMal && entry.rating) {
           Store.updateDiaryEntry(existingDiary.timestamp, { rating: entry.rating });
         }

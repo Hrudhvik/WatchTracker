@@ -84,6 +84,14 @@ const DetailUI = {
     const countries = (d.production_countries || []).map(c => c.name);
     const languages = (d.spoken_languages || []).map(l => l.english_name);
     const ph = isM ? 'MOV' : 'TV';
+    const imdbId = isM ? (d.imdb_id || null) : (d.external_ids?.imdb_id || null);
+
+    // Persist IMDb ID to store if we have it and it's not already saved
+    if (imdbId && stored && !stored.imdbId) {
+      if (isM) Store.updateMovie(tmdbId, { imdbId });
+      else Store.updateTvShow(tmdbId, { imdbId });
+      stored.imdbId = imdbId;
+    }
 
     const rt = isM ? (d.runtime || 0) : 0;
     const rtStr = rt > 0 ? `${Math.floor(rt/60)}h ${rt%60}m` : '';
@@ -222,6 +230,7 @@ const DetailUI = {
             ${stored && (stored._syncOriginalTitle || stored.syncSource) ? `<span id="detailSyncInfo" class="detail-sync-info-icon" title="${stored._syncOriginalTitle ? 'Imported as: ' + esc(stored._syncOriginalTitle) + (stored._syncOriginalYear ? ' (' + stored._syncOriginalYear + ')' : '') : ''}${stored.syncSource ? (stored._syncOriginalTitle ? ' via ' : 'Source: ') + esc(stored.syncSource) : ''}" style="font-size:14px;color:var(--text-2);cursor:help;">&#9432;</span>` : ''}
             <button id="detailMergeBtn" class="btn-ghost" style="font-size:12px; padding:2px 6px; height:auto; min-height:0;">Merge</button>
             <a href="https://www.themoviedb.org/${isM?'movie':'tv'}/${Math.abs(tmdbId)}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; TMDB</a>
+            ${imdbId ? `<a href="https://www.imdb.com/title/${imdbId}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; IMDb</a>` : ''}
             ${stored && stored.malId ? `<a href="https://myanimelist.net/anime/${stored.malId}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; MAL</a>` : ''}
           </div>
           ${stored && stored._id ? `<div style="font-size:10px;color:var(--text-3);opacity:0.5;margin-top:4px;">ID: ${stored._id}</div>` : ''}

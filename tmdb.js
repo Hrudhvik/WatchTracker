@@ -34,7 +34,7 @@ const TMDB = {
 
   // Full TV show details
   async tvDetails(id) {
-    return this._fetch(`/tv/${id}`, { append_to_response: 'credits,videos,recommendations' });
+    return this._fetch(`/tv/${id}`, { append_to_response: 'credits,videos,recommendations,external_ids' });
   },
 
   // TV season details (episodes list)

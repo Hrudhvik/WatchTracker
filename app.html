@@ -1,13 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WatchTracker</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
 
   <nav id="sidebar">
@@ -22,15 +26,15 @@
     </div>
     <div class="nav-section">
       <div class="nav-label">Library</div>
-      <button class="nav-item" data-view="profile">
-        <span class="nav-icon">&#9673;</span> Profile
+      <button class="nav-item active" data-view="watchlist">
+        <span class="nav-icon">&#9776;</span> Watchlist
+        <span class="nav-count" id="totalCount">0</span>
       </button>
       <button class="nav-item" data-view="diary">
         <span class="nav-icon">&#9744;</span> Diary
       </button>
-      <button class="nav-item active" data-view="watchlist">
-        <span class="nav-icon">&#9776;</span> Watchlist
-        <span class="nav-count" id="totalCount">0</span>
+      <button class="nav-item" data-view="profile">
+        <span class="nav-icon">&#9673;</span> Profile
       </button>
     </div>
     <div class="sidebar-footer">
@@ -53,6 +57,7 @@
 
     <section id="page-profile" class="page"></section>
     <section id="page-diary" class="page"></section>
+    <section id="page-activity" class="page"></section>
 
     <section id="page-watchlist" class="page active-page">
       <div class="list-tabs-bar">
@@ -62,7 +67,8 @@
           <button class="list-tab" data-status="completed"><span class="tab-dot dot-completed"></span>Completed</button>
           <button class="list-tab" data-status="on_hold"><span class="tab-dot dot-hold"></span>On Hold</button>
           <button class="list-tab" data-status="dropped"><span class="tab-dot dot-dropped"></span>Dropped</button>
-          <button class="list-tab" data-status="plan_to_watch"><span class="tab-dot dot-plan"></span>Plan to Watch</button>
+          <button class="list-tab" data-status="plan_to_watch"><span class="tab-dot dot-plan"></span>Plan to
+            Watch</button>
         </div>
         <div class="list-tabs-right">
           <div class="custom-dd" id="listSortDD">
@@ -120,7 +126,8 @@
       <div class="modal-body">
         <div class="field">
           <label>TMDB API Key</label>
-          <p class="field-hint">Get a free API key at <a href="https://www.themoviedb.org/settings/api" target="_blank">themoviedb.org/settings/api</a></p>
+          <p class="field-hint">Get a free API key at <a href="https://www.themoviedb.org/settings/api"
+              target="_blank">themoviedb.org/settings/api</a></p>
           <div class="input-row">
             <input type="password" id="apiKeyInput" placeholder="Paste your TMDB v3 API key">
             <button id="toggleKeyVis" class="icon-btn-sm">&#9673;</button>
@@ -138,23 +145,35 @@
           <div class="settings-panel" id="themePanel">
             <p class="field-hint" style="margin-bottom:10px;">Choose a preset or build your own</p>
             <div class="theme-grid" id="themeGrid">
-              <button class="theme-swatch active" data-theme="default"><span class="swatch-preview" style="background:linear-gradient(135deg,#08090c,#151820)"></span><span>Default</span></button>
-              <button class="theme-swatch" data-theme="midnight"><span class="swatch-preview" style="background:linear-gradient(135deg,#0d1117,#161b22)"></span><span>Midnight</span></button>
-              <button class="theme-swatch" data-theme="ocean"><span class="swatch-preview" style="background:linear-gradient(135deg,#0a192f,#112240)"></span><span>Ocean</span></button>
-              <button class="theme-swatch" data-theme="forest"><span class="swatch-preview" style="background:linear-gradient(135deg,#0b1a0b,#132413)"></span><span>Forest</span></button>
-              <button class="theme-swatch" data-theme="sunset"><span class="swatch-preview" style="background:linear-gradient(135deg,#1a0a0a,#2d1515)"></span><span>Sunset</span></button>
-              <button class="theme-swatch" data-theme="sakura"><span class="swatch-preview" style="background:linear-gradient(135deg,#1a0f18,#2a1525)"></span><span>Sakura</span></button>
-              <button class="theme-swatch" data-theme="nord"><span class="swatch-preview" style="background:linear-gradient(135deg,#2e3440,#3b4252)"></span><span>Nord</span></button>
-              <button class="theme-swatch" data-theme="light"><span class="swatch-preview" style="background:linear-gradient(135deg,#f5f5f7,#e8e8ed)"></span><span>Light</span></button>
+              <button class="theme-swatch active" data-theme="default"><span class="swatch-preview"
+                  style="background:linear-gradient(135deg,#08090c,#151820)"></span><span>Default</span></button>
+              <button class="theme-swatch" data-theme="midnight"><span class="swatch-preview"
+                  style="background:linear-gradient(135deg,#0d1117,#161b22)"></span><span>Midnight</span></button>
+              <button class="theme-swatch" data-theme="ocean"><span class="swatch-preview"
+                  style="background:linear-gradient(135deg,#0a192f,#112240)"></span><span>Ocean</span></button>
+              <button class="theme-swatch" data-theme="forest"><span class="swatch-preview"
+                  style="background:linear-gradient(135deg,#0b1a0b,#132413)"></span><span>Forest</span></button>
+              <button class="theme-swatch" data-theme="sunset"><span class="swatch-preview"
+                  style="background:linear-gradient(135deg,#1a0a0a,#2d1515)"></span><span>Sunset</span></button>
+              <button class="theme-swatch" data-theme="sakura"><span class="swatch-preview"
+                  style="background:linear-gradient(135deg,#1a0f18,#2a1525)"></span><span>Sakura</span></button>
+              <button class="theme-swatch" data-theme="nord"><span class="swatch-preview"
+                  style="background:linear-gradient(135deg,#2e3440,#3b4252)"></span><span>Nord</span></button>
+              <button class="theme-swatch" data-theme="light"><span class="swatch-preview"
+                  style="background:linear-gradient(135deg,#f5f5f7,#e8e8ed)"></span><span>Light</span></button>
             </div>
 
             <div class="ct-section">
               <p class="ct-section-label">Custom Colors</p>
               <div class="custom-theme-row">
-                <div class="ct-field"><span class="ct-label">BG</span><input type="color" id="ctBg" value="#08090c" class="ct-color"></div>
-                <div class="ct-field"><span class="ct-label">Surface</span><input type="color" id="ctSurface" value="#151820" class="ct-color"></div>
-                <div class="ct-field"><span class="ct-label">Accent</span><input type="color" id="ctAccent" value="#6c5ce7" class="ct-color"></div>
-                <div class="ct-field"><span class="ct-label">Text</span><input type="color" id="ctText" value="#f0f2f5" class="ct-color"></div>
+                <div class="ct-field"><span class="ct-label">BG</span><input type="color" id="ctBg" value="#08090c"
+                    class="ct-color"></div>
+                <div class="ct-field"><span class="ct-label">Surface</span><input type="color" id="ctSurface"
+                    value="#151820" class="ct-color"></div>
+                <div class="ct-field"><span class="ct-label">Accent</span><input type="color" id="ctAccent"
+                    value="#6c5ce7" class="ct-color"></div>
+                <div class="ct-field"><span class="ct-label">Text</span><input type="color" id="ctText" value="#f0f2f5"
+                    class="ct-color"></div>
               </div>
               <div class="btn-row" style="margin-top:8px;">
                 <button id="applyCustomTheme" class="btn-ghost">Apply Colors</button>
@@ -242,7 +261,8 @@
             <span class="accordion-arrow" id="syncArrow">&#9662;</span>
           </button>
           <div class="settings-panel" id="syncPanel">
-            <p class="field-hint" style="margin-bottom:12px;">Connect your accounts to sync diary entries and watchlist updates. Uses public RSS feeds and APIs — no passwords needed.</p>
+            <p class="field-hint" style="margin-bottom:12px;">Connect your accounts to sync diary entries and watchlist
+              updates. Uses public RSS feeds and APIs — no passwords needed.</p>
 
             <!-- Letterboxd Sync -->
             <div class="sync-service">
@@ -265,7 +285,10 @@
                 <span class="sync-service-name">MyAnimeList</span>
                 <span class="sync-status" id="malSyncStatus"></span>
               </div>
-              <p class="field-hint" style="margin:6px 0 4px;">Get a free Client ID at <a href="https://myanimelist.net/apiconfig" target="_blank">myanimelist.net/apiconfig</a>. Set App Type to "other", redirect URI to <code id="malRedirectUri" style="font-size:10px;user-select:all;"></code></p>
+              <p class="field-hint" style="margin:6px 0 4px;">Get a free Client ID at <a
+                  href="https://myanimelist.net/apiconfig" target="_blank">myanimelist.net/apiconfig</a>. Set App Type
+                to "other", redirect URI to <code id="malRedirectUri" style="font-size:10px;user-select:all;"></code>
+              </p>
               <div class="input-row" style="margin-top:6px;">
                 <input type="password" id="malClientId" placeholder="MAL Client ID" class="sync-input">
                 <button id="toggleMalKeyVis" class="icon-btn-sm">&#9673;</button>
@@ -311,7 +334,9 @@
             <span class="sync-progress-label" id="syncProgressLabel">Working</span>
             <span class="sync-progress-pct" id="syncProgressPct">0%</span>
           </div>
-          <div class="sync-progress-bar"><div class="sync-progress-fill" id="syncProgressFill"></div></div>
+          <div class="sync-progress-bar">
+            <div class="sync-progress-fill" id="syncProgressFill"></div>
+          </div>
           <div class="sync-progress-text" id="syncProgressText">Preparing...</div>
         </div>
 
@@ -326,8 +351,10 @@
   <script src="sync.js"></script>
   <script src="ui-list.js"></script>
   <script src="ui-detail.js"></script>
-  <script src="ui-profile.js"></script>
   <script src="ui-diary.js"></script>
+  <script src="ui-profile.js"></script>
+  <script src="ui-activity.js"></script>
   <script src="app.js"></script>
 </body>
+
 </html>
