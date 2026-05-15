@@ -2,7 +2,7 @@
 
 const ActivityUI = {
   currentPage: 1,
-  itemsPerPage: 50,
+  itemsPerPage: 25,
   _scrollInit: false,
 
   render() {
@@ -26,7 +26,7 @@ const ActivityUI = {
     }
 
     const activity = Store.getActivity();
-    
+
     // Fallback missing posters
     activity.forEach(a => {
       if (!a.posterPath || a.posterPath.includes('cdn.jikan')) {
@@ -99,12 +99,12 @@ const ActivityUI = {
         html += `<div class="timeline-group">
           <div class="timeline-header"><span class="timeline-dot"></span>${g.label}</div>
           <div class="timeline-items">`;
-        
+
         g.items.forEach(a => {
           const poster = TMDB.poster(a.posterPath, 'w154');
           const typeLabel = a.type === 'movie' ? 'MOV' : 'TV';
           const tag = getStatusTag(a.detail || a.action);
-          
+
           html += `<div class="timeline-card" data-tmdb="${a.tmdbId}" data-type="${a.type}">
             <div class="tl-poster">
               ${poster ? `<img src="${poster}" loading="lazy">` : `<div class="no-poster-ph">${typeLabel}</div>`}
@@ -129,11 +129,11 @@ const ActivityUI = {
       html += `<div class="pagination-bar">
         <button class="btn-ghost" id="btnPagePrev" ${this.currentPage === 1 ? 'disabled' : ''}>Previous</button>
         <div class="pagination-numbers">`;
-      
+
       const maxPagesToShow = 5;
       let startPage = Math.max(1, this.currentPage - Math.floor(maxPagesToShow / 2));
       let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
-      
+
       if (endPage - startPage + 1 < maxPagesToShow) {
         startPage = Math.max(1, endPage - maxPagesToShow + 1);
       }
@@ -240,13 +240,13 @@ const ActivityUI = {
     if (!dStr) return "UNKNOWN DATE";
     const date = new Date(dStr);
     const now = new Date();
-    
+
     const dDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
     const nDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    
+
     const diffTime = nDate.getTime() - dDate.getTime();
     const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-    
+
     if (diffDays === 0) return "TODAY";
     if (diffDays === 1) return "YESTERDAY";
     if (diffDays === 2) return "2 DAYS AGO";

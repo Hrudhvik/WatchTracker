@@ -1,13 +1,27 @@
 /* Detail Page — Movie + TV unified, no emojis */
 
 const DetailUI = {
-  async open(tmdbId, mediaType) {
+  _navHistory: [], // Stack of {tmdbId, mediaType} for back navigation through related anime
+
+  async open(tmdbId, mediaType, pushHistory = true) {
     const page = document.getElementById('page-detail');
     page.innerHTML = '<div style="padding:40px;color:var(--text-3)">Loading...</div>';
     App.showPage('detail');
 
+    // Push previous page to history for back navigation (unless we're going back)
+    if (pushHistory && this._currentDetail) {
+      this._navHistory.push({ ...this._currentDetail });
+    }
+    this._currentDetail = { tmdbId, mediaType };
+
     let isM = mediaType === 'movie';
     let stored = isM ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
+
+    // Check for temporary stored entry (from related anime navigation to untracked entry)
+    if (!stored && this._tempStored && this._tempStored.tmdbId === tmdbId) {
+      stored = this._tempStored;
+      this._tempStored = null;
+    }
 
     // If not found, the diary entry may have a stale tmdbId — try finding by title
     if (!stored) {
@@ -27,9 +41,14 @@ const DetailUI = {
     }
 
     let d;
+    const isAnime = stored && stored.sourceTag === 'anime';
 
+    // For anime TV shows: always use Jikan as primary data source regardless of TMDB match
+    if (isAnime && !isM && stored) {
+      d = await this._buildMalDetail(stored, isM);
+    }
     // For MAL-only entries (negative tmdbId), build detail from stored data + Jikan
-    if (tmdbId < 0 && stored) {
+    else if (tmdbId < 0 && stored) {
       d = await this._buildMalDetail(stored, isM);
     } else {
       try {
@@ -71,7 +90,7 @@ const DetailUI = {
     // Keep mediaType in sync after potential type swap
     mediaType = isM ? 'movie' : 'tv';
 
-    const inList = !!stored;
+    const inList = isM ? Store.hasMovie(tmdbId) : (Store.hasTvShow(tmdbId) || (stored?.malId && Store.hasTvShowByMalId(stored.malId)));
     const backdrop = TMDB.backdrop(d.backdrop_path);
     const poster = TMDB.poster(d.poster_path, 'w500');
     const title = isM ? d.title : d.name;
@@ -105,8 +124,29 @@ const DetailUI = {
     const epRt = !isM ? ((d.episode_run_time || [])[0] || '') : '';
     let tmdbS = !isM ? (d.seasons || []).filter(s => s.season_number > 0) : [];
     
-    // For MAL-only entries without seasons, create a single "season" row
-    if (!isM && tmdbId < 0 && tmdbS.length === 0 && (d.number_of_episodes > 0 || stored?.totalEpisodes > 0)) {
+    // For anime/MAL entries without seasons, create a single "season" row
+    if (!isM && isAnime && tmdbS.length === 0 && (d.number_of_episodes > 0 || stored?.totalEpisodes > 0)) {
+      const epCount = d.number_of_episodes || stored.totalEpisodes || 0;
+      tmdbS = [{
+        season_number: 1,
+        episode_count: epCount,
+        poster_path: d.poster_path || stored?.posterPath,
+        name: stored?.title || 'Anime Series'
+      }];
+      // Auto-initialize the store if it's missing the season structure
+      if (stored && (!stored.seasons || stored.seasons.length === 0)) {
+        stored.seasons = [{
+          seasonNumber: 1,
+          episodeCount: epCount,
+          episodesWatched: stored.episodesWatched || 0,
+          rewatchCount: stored.rewatchCount || 0
+        }];
+        if (stored.malId) Store.updateTvShowByMalId(stored.malId, { seasons: stored.seasons });
+        else Store.updateTvShow(tmdbId, { seasons: stored.seasons });
+      }
+    }
+    // For non-anime MAL-only entries without seasons
+    else if (!isM && tmdbId < 0 && tmdbS.length === 0 && (d.number_of_episodes > 0 || stored?.totalEpisodes > 0)) {
       const epCount = d.number_of_episodes || stored.totalEpisodes || 0;
       tmdbS = [{
         season_number: 1,
@@ -114,7 +154,6 @@ const DetailUI = {
         poster_path: d.poster_path || stored?.posterPath,
         name: 'Anime Series'
       }];
-      // Auto-initialize the store if it's missing the season structure
       if (stored && (!stored.seasons || stored.seasons.length === 0)) {
         stored.seasons = [{
           seasonNumber: 1,
@@ -135,10 +174,10 @@ const DetailUI = {
 
     let chips = genres.map(g => `<span class="detail-chip">${esc(g)}</span>`).join('');
     if (isM) { if (year) chips += `<span class="detail-chip">${year}</span>`; if (rtStr) chips += `<span class="detail-chip">${rtStr}</span>`; }
+    else if (isAnime) { if (yearRange) chips += `<span class="detail-chip">${yearRange}</span>`; chips += `<span class="detail-chip">${d.number_of_episodes||'?'} Eps</span>`; if (d.status) chips += `<span class="detail-chip">${esc(d.status)}</span>`; }
     else { if (yearRange) chips += `<span class="detail-chip">${yearRange}</span>`; chips += `<span class="detail-chip">${d.number_of_seasons||'?'} Seasons</span><span class="detail-chip">${d.number_of_episodes||'?'} Eps</span>`; }
 
     let stats = '';
-    const isAnime = stored && stored.sourceTag === 'anime';
     const scoreLabel = isAnime ? 'MAL' : 'TMDB';
     if (d.vote_average) stats += `<div class="detail-stat"><div class="detail-stat-val gold">${d.vote_average.toFixed(1)}</div><div class="detail-stat-label">${scoreLabel} ${d.vote_count ? `(${d.vote_count})` : ''}</div></div>`;
     if (inList) {
@@ -176,22 +215,48 @@ const DetailUI = {
     let seasonHtml = '';
     if (!isM && inList && tmdbS.length) {
       const sRatings = Store.getSeasonRatings(tmdbId);
+      const seasonStatuses = stored?.seasonStatuses || {};
+      const ssLabels = { watching:'Watching', completed:'Completed', on_hold:'On-Hold', dropped:'Dropped', plan_to_watch:'Plan to Watch', not_started:'—' };
+      const ssColors = { watching:'#00b894', completed:'#6c5ce7', on_hold:'#fdcb6e', dropped:'#e17055', plan_to_watch:'#a29bfe', not_started:'#4a5068' };
+      const ssOpts = [
+        { val:'not_started', label:'—', color:'#4a5068' },
+        { val:'watching', label:'Watching', color:'#00b894' },
+        { val:'completed', label:'Completed', color:'#6c5ce7' },
+        { val:'on_hold', label:'On-Hold', color:'#fdcb6e' },
+        { val:'dropped', label:'Dropped', color:'#e17055' },
+        { val:'plan_to_watch', label:'Plan to Watch', color:'#a29bfe' },
+      ];
       seasonHtml = `<div class="detail-section"><h3>Season Progress</h3><div class="season-track-list" id="seasonTrackList">${tmdbS.map(s => {
         const tr = sMap[s.season_number] || { episodesWatched: 0, rewatchCount: 0 };
         const w = tr.episodesWatched||0, tot = s.episode_count||0;
-        const done = w>=tot&&tot>0, pct = tot>0?(w/tot)*100:0;
-        const sp = TMDB.poster(s.poster_path, 'w185');
+        const unknownTotal = tot === 0 && w > 0;
+        const done = w>=tot&&tot>0;
+        // Progress: if total unknown but has watched eps, cap at 90%
+        const pct = unknownTotal ? 90 : (tot>0?(w/tot)*100:0);
+        const sp = TMDB.poster(s.poster_path, 'w185') || (isAnime ? TMDB.poster(d.poster_path || stored?.posterPath, 'w185') : null);
         const ay = s.air_date ? s.air_date.substring(0,4) : '';
         const sRate = sRatings[s.season_number];
         const sRw = tr.rewatchCount || 0;
+        // Per-season status (auto-derive if not manually set)
+        const sStatus = !isAnime ? (seasonStatuses[s.season_number] || (done ? 'completed' : w > 0 ? 'watching' : 'not_started')) : stored?.watchStatus;
+        // Progress bar color matches season status
+        const barColor = sStatus ? (ssColors[sStatus] || 'var(--accent-light)') : (done ? '#00b894' : w > 0 ? '#00b894' : 'var(--accent-light)');
+        // Season status select (not for anime) — native select to avoid overflow clipping
+        const sStatusSelect = sStatus && !isAnime ? `<select class="season-status-select" data-snum="${s.season_number}" style="color:${ssColors[sStatus]||'#4a5068'};border-color:${(ssColors[sStatus]||'#4a5068')}40;">
+          ${ssOpts.map(o => `<option value="${o.val}" ${o.val===sStatus?'selected':''}>${o.label}</option>`).join('')}
+        </select>` : '';
+        // Display "?" for unknown totals
+        const epDisplay = unknownTotal ? `${w} / ?` : `${w} / ${tot}`;
+        const metaEps = unknownTotal ? '? eps' : `${tot} eps`;
         return `<div class="season-track-card ${done?'season-done':'season-active'}" data-snum="${s.season_number}">
           ${sp?`<img class="season-poster" src="${sp}" loading="lazy">`:`<div class="season-poster no-poster-ph" style="font-size:10px;">S${s.season_number}</div>`}
-          <div class="season-info" data-snum="${s.season_number}"><h4>Season ${s.season_number}${sRate?` <span class="season-user-rating">★ ${sRate}/10</span>`:''}${sRw > 0 ? ` <span class="season-rewatch-badge"><span class="rw-icon">↻</span>${sRw}</span>` : ''}</h4><div class="season-meta">${tot} eps${ay?' · '+ay:''}</div>
-            <div class="season-progress-bar"><div class="season-progress-fill" style="width:${pct}%;background:${done?'var(--watching)':'var(--accent-light)'}"></div></div>
+          <div class="season-info" data-snum="${s.season_number}"><h4>${isAnime ? esc(stored.title || 'Season '+s.season_number) : 'Season '+s.season_number}${sRate?` <span class="season-user-rating">★ ${sRate}/10</span>`:''}${sRw > 0 ? ` <span class="season-rewatch-badge"><span class="rw-icon">↻</span>${sRw}</span>` : ''}${sStatusSelect ? ` ${sStatusSelect}` : ''}</h4><div class="season-meta">${metaEps}${ay?' · '+ay:''}</div>
+            <div class="season-progress-bar"><div class="season-progress-fill" style="width:${pct}%;background:${barColor === 'transparent' ? 'var(--text-3)' : barColor}"></div></div>
           </div>
           <div class="season-controls"><div class="ep-counter">
             <button class="ep-dec" data-snum="${s.season_number}">-</button>
-            <div class="ep-counter-val">${w} / ${tot}</div>
+            <input class="ep-counter-input" data-snum="${s.season_number}" type="number" value="${w}" min="0" ${tot > 0 ? `max="${tot}"` : ''}>
+            <span class="ep-counter-total">/ ${unknownTotal ? '?' : tot}</span>
             <button class="ep-inc" data-snum="${s.season_number}">+</button>
           </div><div class="season-btn-col"><button class="season-done-btn ${done?'undone':'mark-done'}" data-snum="${s.season_number}">${done?'Undo':'Done'}</button><button class="season-diary-btn" data-snum="${s.season_number}" title="Log to diary">Log</button><button class="season-rw-btn" data-snum="${s.season_number}" title="Rewatch this season">↻ Rw${sRw > 0 ? ' '+sRw : ''}</button></div></div>
         </div>`;
@@ -229,7 +294,7 @@ const DetailUI = {
             <button id="detailManualSyncBtn" class="btn-ghost" style="font-size:12px; padding:2px 6px; margin-left:auto; height:auto; min-height:0;">&#128279; Link</button>
             ${stored && (stored._syncOriginalTitle || stored.syncSource) ? `<span id="detailSyncInfo" class="detail-sync-info-icon" title="${stored._syncOriginalTitle ? 'Imported as: ' + esc(stored._syncOriginalTitle) + (stored._syncOriginalYear ? ' (' + stored._syncOriginalYear + ')' : '') : ''}${stored.syncSource ? (stored._syncOriginalTitle ? ' via ' : 'Source: ') + esc(stored.syncSource) : ''}" style="font-size:14px;color:var(--text-2);cursor:help;">&#9432;</span>` : ''}
             <button id="detailMergeBtn" class="btn-ghost" style="font-size:12px; padding:2px 6px; height:auto; min-height:0;">Merge</button>
-            <a href="https://www.themoviedb.org/${isM?'movie':'tv'}/${Math.abs(tmdbId)}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; TMDB</a>
+            ${!isAnime ? `<a href="https://www.themoviedb.org/${isM?'movie':'tv'}/${Math.abs(tmdbId)}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; TMDB</a>` : ''}
             ${imdbId ? `<a href="https://www.imdb.com/title/${imdbId}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; IMDb</a>` : ''}
             ${stored && stored.malId ? `<a href="https://myanimelist.net/anime/${stored.malId}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; MAL</a>` : ''}
           </div>
@@ -273,17 +338,62 @@ const DetailUI = {
         ${!isM&&networks.length?`<div class="detail-section"><h3>Networks</h3><div class="companies-row">${networks.map(n=>`<div class="company-tag">${n.logo_path?`<img src="${TMDB.poster(n.logo_path,'w92')}">`:''}${esc(n.name)}</div>`).join('')}</div></div>`:''}
         ${companies.length?`<div class="detail-section"><h3>Production</h3><div class="companies-row">${companies.map(c=>`<div class="company-tag">${c.logo_path?`<img src="${TMDB.poster(c.logo_path,'w92')}">`:''}${esc(c.name)}</div>`).join('')}</div></div>`:''}
         ${trailer?`<div class="detail-section"><h3>Trailer</h3><div style="border-radius:12px;overflow:hidden;max-width:640px;"><iframe width="100%" height="360" src="https://www.youtube-nocookie.com/embed/${trailer.key}?rel=0&modestbranding=1&origin=null" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="display:block;"></iframe></div></div>`:''}
+        ${(() => {
+          const rels = d._malRelations || [];
+          if (!rels.length) return '';
+          // Group by relation type, order: Prequel, Sequel, then others
+          const relOrder = ['Prequel', 'Sequel', 'Parent Story', 'Side Story', 'Spin-off', 'Alternative Version', 'Summary', 'Full Story'];
+          const grouped = {};
+          for (const r of rels) {
+            if (!grouped[r.relation]) grouped[r.relation] = [];
+            grouped[r.relation].push(r);
+          }
+          const sortedTypes = Object.keys(grouped).sort((a, b) => {
+            const ai = relOrder.indexOf(a); const bi = relOrder.indexOf(b);
+            return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+          });
+          return `<div class="detail-section"><h3>Related</h3><div class="mal-relations-list">${sortedTypes.map(type =>
+            `<div class="mal-relation-group">${grouped[type].map(r => {
+              // Check if we have this anime in store
+              const inStore = Store.getTvShowByMalId(r.malId) || Store.getMovies().find(m => m.malId === r.malId);
+              const statusDot = inStore ? (inStore.watchStatus === 'completed' ? 'var(--watching)' : inStore.watchStatus === 'watching' ? 'var(--accent-light)' : inStore.watchStatus === 'dropped' ? 'var(--dropped)' : 'var(--text-3)') : 'transparent';
+              const storeId = inStore ? inStore.tmdbId : null;
+              const storeType = inStore ? (inStore.mediaType || 'tv') : 'tv';
+              return `<div class="mal-relation-card" ${storeId !== null ? `data-rel-tmdb="${storeId}" data-rel-type="${storeType}"` : `data-rel-mal="${r.malId}"`}>
+                <div class="mal-relation-type">${esc(type)}</div>
+                <div class="mal-relation-title"><span class="mal-relation-dot" style="background:${statusDot};${statusDot === 'transparent' ? 'border:1.5px solid var(--text-3);' : ''}"></span>${esc(r.title)}</div>
+              </div>`;
+            }).join('')}</div>`
+          ).join('')}</div></div>`;
+        })()}
         ${recs.length?`<div class="detail-section"><h3>Recommended</h3><div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;">${recs.map(r=>{const rP=TMDB.poster(r.poster_path,'w185');const rT=r.media_type||(r.first_air_date?'tv':'movie');return`<div class="grid-card" data-tmdb="${r.id}" data-type="${rT}" style="flex-shrink:0;width:130px;"><div class="poster-wrap" style="aspect-ratio:2/3;">${rP?`<img src="${rP}" loading="lazy">`:`<div class="no-poster-ph">${ph}</div>`}<div class="poster-overlay"></div></div><div class="grid-card-info"><div class="grid-card-title">${esc(r.title||r.name)}</div></div></div>`;}).join('')}</div></div>`:''}
       </div>`;
 
-    page.querySelector('#detailBackBtn').addEventListener('click', () => App.showPage(currentView || 'watchlist'));
+    page.querySelector('#detailBackBtn').addEventListener('click', () => { if (DetailUI._navHistory.length > 0) { const prev = DetailUI._navHistory.pop(); DetailUI.open(prev.tmdbId, prev.mediaType, false); } else { App.showPage(currentView || 'watchlist'); } });
 
     const addBtn = page.querySelector('#detailAddBtn');
     if (addBtn) addBtn.addEventListener('click', () => {
-      if (isM) Store.addMovie({ tmdbId:d.id, title:d.title, posterPath:d.poster_path, backdropPath:d.backdrop_path, year:parseInt(year)||0, voteAverage:d.vote_average||0, runtime:rt, genres, watchStatus:'plan_to_watch', rewatchCount:0, rewatchHistory:[], startDate:'', endDate:'', dateAdded:new Date().toISOString(), dateUpdated:new Date().toISOString() });
-      else Store.addTvShow({ tmdbId:d.id, title:d.name, posterPath:d.poster_path, backdropPath:d.backdrop_path, year:parseInt(year)||0, voteAverage:d.vote_average||0, totalSeasons:d.number_of_seasons||0, totalEpisodes:d.number_of_episodes||0, genres, watchStatus:'plan_to_watch', rewatchCount:0, rewatchHistory:[], startDate:'', endDate:'', seasons:tmdbS.map(s=>({seasonNumber:s.season_number,episodeCount:s.episode_count||0,episodesWatched:0,posterPath:s.poster_path})), dateAdded:new Date().toISOString(), dateUpdated:new Date().toISOString() });
-      Store.addActivity({ tmdbId:d.id, title, type:mediaType, posterPath:d.poster_path, action:'added', detail:'Added to list', timestamp:new Date().toISOString() });
-      App.refreshCounts(); toast(`Added "${title}"`); this.open(tmdbId, mediaType);
+      if (isAnime && !isM && stored?.malId) {
+        // Anime TV: add with malId, flat season, sourceTag
+        Store.addTvShow({
+          tmdbId: stored.tmdbId, malId: stored.malId,
+          malTmdbId: stored.malTmdbId || null,
+          title: d.name || title, posterPath: d.poster_path, backdropPath: d.backdrop_path,
+          year: parseInt(year)||0, voteAverage: d.vote_average||0,
+          totalSeasons: 1, totalEpisodes: d.number_of_episodes||0, genres,
+          watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [],
+          startDate: '', endDate: '',
+          seasons: [{ seasonNumber: 1, episodeCount: d.number_of_episodes||0, episodesWatched: 0 }],
+          dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString(),
+          sourceTag: 'anime',
+        });
+      } else if (isM) {
+        Store.addMovie({ tmdbId:d.id, title:d.title, posterPath:d.poster_path, backdropPath:d.backdrop_path, year:parseInt(year)||0, voteAverage:d.vote_average||0, runtime:rt, genres, watchStatus:'plan_to_watch', rewatchCount:0, rewatchHistory:[], startDate:'', endDate:'', dateAdded:new Date().toISOString(), dateUpdated:new Date().toISOString() });
+      } else {
+        Store.addTvShow({ tmdbId:d.id, title:d.name, posterPath:d.poster_path, backdropPath:d.backdrop_path, year:parseInt(year)||0, voteAverage:d.vote_average||0, totalSeasons:d.number_of_seasons||0, totalEpisodes:d.number_of_episodes||0, genres, watchStatus:'plan_to_watch', rewatchCount:0, rewatchHistory:[], startDate:'', endDate:'', seasons:tmdbS.map(s=>({seasonNumber:s.season_number,episodeCount:s.episode_count||0,episodesWatched:0,posterPath:s.poster_path})), dateAdded:new Date().toISOString(), dateUpdated:new Date().toISOString() });
+      }
+      Store.addActivity({ tmdbId: stored?.tmdbId || d.id, title, type:mediaType, posterPath:d.poster_path, action:'added', detail:'Added to list', timestamp:new Date().toISOString() });
+      App.refreshCounts(); toast(`Added "${title}"`); this.open(tmdbId, mediaType, false);
     });
 
     // Custom status dropdown
@@ -306,7 +416,8 @@ const DetailUI = {
           ddMenu.querySelectorAll('.dd-item').forEach(i => i.classList.toggle('active', i.dataset.val === ns));
           ddMenu.classList.add('hidden'); ddWrap.classList.remove('open');
           const os = stored.watchStatus;
-          if (isM) Store.updateMovie(tmdbId, { watchStatus: ns }); else Store.updateTvShow(tmdbId, { watchStatus: ns });
+          if (isAnime && !isM && stored.malId) Store.updateTvShowByMalId(stored.malId, { watchStatus: ns });
+          else if (isM) Store.updateMovie(tmdbId, { watchStatus: ns }); else Store.updateTvShow(tmdbId, { watchStatus: ns });
           if (os !== ns) Store.addActivity({ tmdbId, title, type: mediaType, posterPath: stored.posterPath, action:'status_change', detail:`Changed to ${sl[ns]}`, timestamp:new Date().toISOString() });
           App.refreshCounts(); toast(`Status: ${sl[ns]}`);
         });
@@ -361,19 +472,97 @@ const DetailUI = {
           e.stopPropagation();
           const sn = parseInt(btn.dataset.snum);
           const show = Store.getTvShow(tmdbId); if (!show) return;
+          const isAnimeEntry = show.sourceTag === 'anime' && show.malId;
           const ss = show.seasons || [];
           const si = ss.findIndex(s => s.seasonNumber === sn); if (si === -1) return;
           const s = ss[si];
           s.rewatchCount = (s.rewatchCount || 0) + 1;
           s.episodesWatched = 0; // Reset progress for rewatch
-          Store.updateTvShow(tmdbId, { seasons: ss });
+          if (isAnimeEntry) Store.updateTvShowByMalId(show.malId, { seasons: ss });
+          else Store.updateTvShow(tmdbId, { seasons: ss });
           toast(`Season ${sn} rewatch #${s.rewatchCount} started`);
           this.open(tmdbId, 'tv'); // Refresh
         });
       });
+      // Per-season status select (TMDB TV shows only, not anime)
+      if (!isAnime) {
+        page.querySelectorAll('.season-status-select').forEach(sel => {
+          sel.addEventListener('click', e => e.stopPropagation()); // Prevent season-info click
+          sel.addEventListener('change', e => {
+            e.stopPropagation();
+            const sn = parseInt(sel.dataset.snum);
+            const val = sel.value;
+            const show = Store.getTvShow(tmdbId); if (!show) return;
+            const seasonStatuses = show.seasonStatuses || {};
+            seasonStatuses[sn] = val;
+
+            // Cascade logic
+            const ss = show.seasons || [];
+            let newShowStatus = show.watchStatus;
+
+            if (val === 'dropped') newShowStatus = 'dropped';
+            else if (val === 'on_hold') newShowStatus = 'on_hold';
+            else if (val === 'completed') {
+              const nextSn = sn + 1;
+              const nextS = ss.find(x => x.seasonNumber === nextSn);
+              if (nextS && (!seasonStatuses[nextSn] || seasonStatuses[nextSn] === 'not_started')) {
+                seasonStatuses[nextSn] = 'watching';
+              }
+              const allCompleted = ss.every(x => (seasonStatuses[x.seasonNumber] || 'not_started') === 'completed' || x.seasonNumber === sn);
+              newShowStatus = allCompleted ? 'completed' : 'watching';
+            }
+            else if (val === 'watching') newShowStatus = 'watching';
+            else if (val === 'plan_to_watch') {
+              const allInactive = ss.every(x => {
+                const st = x.seasonNumber === sn ? val : (seasonStatuses[x.seasonNumber] || 'not_started');
+                return st === 'not_started' || st === 'plan_to_watch';
+              });
+              if (allInactive) newShowStatus = 'plan_to_watch';
+            }
+
+            Store.updateTvShow(tmdbId, { seasonStatuses, watchStatus: newShowStatus });
+            App.refreshCounts();
+            DetailUI.open(tmdbId, 'tv', false);
+          });
+        });
+      }
     }
 
     page.querySelectorAll('.detail-body [data-tmdb]').forEach(c => c.addEventListener('click', () => this.open(parseInt(c.dataset.tmdb), c.dataset.type)));
+
+    // Related anime navigation — click to open related entries
+    page.querySelectorAll('.mal-relation-card').forEach(card => {
+      card.style.cursor = 'pointer';
+      card.addEventListener('click', () => {
+        const relTmdb = card.dataset.relTmdb;
+        const relType = card.dataset.relType || 'tv';
+        const relMal = card.dataset.relMal;
+        if (relTmdb) {
+          this.open(parseInt(relTmdb), relType);
+        } else if (relMal) {
+          const malId = parseInt(relMal);
+          const inStore = Store.getTvShowByMalId(malId) || Store.getMovies().find(m => m.malId === malId);
+          if (inStore) {
+            this.open(inStore.tmdbId, inStore.mediaType || 'tv');
+          } else {
+            // Not in library — navigate to detail view without adding to list
+            // _buildMalDetail will fetch from Jikan. We create a temporary stored
+            // object that open() uses, but don't persist it.
+            this._tempStored = {
+              tmdbId: -malId, malId: malId,
+              title: card.querySelector('.mal-relation-title')?.textContent?.trim() || '',
+              posterPath: null, backdropPath: null, year: 0, voteAverage: 0,
+              totalSeasons: 1, totalEpisodes: 0, genres: [],
+              watchStatus: null, rewatchCount: 0, rewatchHistory: [],
+              startDate: '', endDate: '',
+              seasons: [{ seasonNumber: 1, episodeCount: 0, episodesWatched: 0 }],
+              sourceTag: 'anime',
+            };
+            this.open(-malId, 'tv');
+          }
+        }
+      });
+    });
 
     // Handle broken poster images
     page.querySelectorAll('img').forEach(img => {
@@ -519,23 +708,42 @@ const DetailUI = {
             });
           } else {
             const d = await TMDB.tvDetails(newTmdbId);
-            const ss = (d.seasons || []).filter(s => s.season_number > 0);
             const existing = Store.getTvShow(newTmdbId);
-            const existingSeasons = existing?.seasons || [];
-            // Build season data, preserving existing watch progress
-            const seasonData = ss.map(s => {
-              const prev = existingSeasons.find(es => es.seasonNumber === s.season_number);
-              return {
-                seasonNumber: s.season_number,
-                episodeCount: s.episode_count || 0,
-                episodesWatched: prev ? prev.episodesWatched || 0 : 0,
-                posterPath: s.poster_path,
-                rewatchCount: prev ? prev.rewatchCount || 0 : 0,
+            const isAnimeEntry = existing?.sourceTag === 'anime';
+
+            if (isAnimeEntry) {
+              // For anime: only use TMDB for supplemental data (poster, backdrop, genres)
+              // Do NOT overwrite season structure — anime uses MAL's flat seasons
+              const updates = {
+                malTmdbId: newTmdbId,
+                backdropPath: d.backdrop_path,
               };
-            });
-            Store.updateTvShow(newTmdbId, {
-              title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.first_air_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: (d.genres || []).map(g => g.name), seasons: seasonData
-            });
+              // Only update poster if current one is missing or broken
+              if (!existing.posterPath || !existing.posterPath.startsWith('http')) {
+                updates.posterPath = d.poster_path;
+              }
+              if (d.genres && d.genres.length && (!existing.genres || !existing.genres.length)) {
+                updates.genres = (d.genres || []).map(g => g.name);
+              }
+              Store.updateTvShow(newTmdbId, updates);
+            } else {
+              // Non-anime: full TMDB season sync
+              const ss = (d.seasons || []).filter(s => s.season_number > 0);
+              const existingSeasons = existing?.seasons || [];
+              const seasonData = ss.map(s => {
+                const prev = existingSeasons.find(es => es.seasonNumber === s.season_number);
+                return {
+                  seasonNumber: s.season_number,
+                  episodeCount: s.episode_count || 0,
+                  episodesWatched: prev ? prev.episodesWatched || 0 : 0,
+                  posterPath: s.poster_path,
+                  rewatchCount: prev ? prev.rewatchCount || 0 : 0,
+                };
+              });
+              Store.updateTvShow(newTmdbId, {
+                title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.first_air_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: (d.genres || []).map(g => g.name), seasons: seasonData
+              });
+            }
           }
         }
 
@@ -744,27 +952,65 @@ const DetailUI = {
   _bindSeason(page, tmdbId, tmdbS) {
     const list = page.querySelector('#seasonTrackList');
     if (!list) return;
-    list.addEventListener('click', e => {
-      const btn = e.target.closest('button'); if (!btn) return;
-      const sn = parseInt(btn.dataset.snum);
-      const show = Store.getTvShow(tmdbId); if (!show) return;
-      const ss = show.seasons||[]; const si = ss.findIndex(s=>s.seasonNumber===sn); if (si===-1) return;
+
+    // Helper to save episode change and update status
+    const saveEpChange = (sn, newVal) => {
+      let show = Store.getTvShow(tmdbId);
+      const isAnime = show && show.sourceTag === 'anime' && show.malId;
+      if (!show) return;
+      const ss = show.seasons||[];
+      const si = ss.findIndex(s=>s.seasonNumber===sn); if (si===-1) return;
       const s = ss[si]; const tot = s.episodeCount||0;
-      if (btn.classList.contains('ep-inc')) { if (s.episodesWatched<tot) s.episodesWatched++; }
-      else if (btn.classList.contains('ep-dec')) { if (s.episodesWatched>0) s.episodesWatched--; }
-      else if (btn.classList.contains('season-done-btn')) { s.episodesWatched = btn.classList.contains('mark-done') ? tot : 0; }
-      else return;
+      s.episodesWatched = tot > 0 ? Math.max(0, Math.min(newVal, tot)) : Math.max(0, newVal);
+
+      const seasonStatuses = show.seasonStatuses || {};
+      const sDone = s.episodesWatched >= tot && tot > 0;
+      if (sDone && (!seasonStatuses[sn] || seasonStatuses[sn] === 'watching' || seasonStatuses[sn] === 'not_started')) {
+        seasonStatuses[sn] = 'completed';
+        const nextS = ss.find(x => x.seasonNumber === sn + 1);
+        if (nextS && (!seasonStatuses[sn+1] || seasonStatuses[sn+1] === 'not_started')) seasonStatuses[sn+1] = 'watching';
+      } else if (s.episodesWatched > 0 && !sDone && (!seasonStatuses[sn] || seasonStatuses[sn] === 'not_started')) {
+        seasonStatuses[sn] = 'watching';
+      } else if (s.episodesWatched === 0 && seasonStatuses[sn] === 'watching') {
+        seasonStatuses[sn] = 'not_started';
+      }
       const allD = ss.every(x=>x.episodesWatched>=(x.episodeCount||0)&&(x.episodeCount||0)>0);
       const anyS = ss.some(x=>x.episodesWatched>0);
       let ns = show.watchStatus; if (allD) ns='completed'; else if (anyS&&show.watchStatus==='plan_to_watch') ns='watching';
-      Store.updateTvShow(tmdbId,{seasons:ss,watchStatus:ns}); App.refreshCounts();
-      const card = list.querySelector(`[data-snum="${sn}"]`);
-      if (card) { const w=s.episodesWatched||0,dn=w>=tot&&tot>0,pct=tot>0?(w/tot)*100:0; card.classList.toggle('season-done',dn); card.classList.toggle('season-active',!dn); card.querySelector('.season-progress-fill').style.width=`${pct}%`; card.querySelector('.season-progress-fill').style.background=dn?'var(--watching)':'var(--accent-light)'; card.querySelector('.ep-counter-val').textContent=`${w} / ${tot}`; const db=card.querySelector('.season-done-btn'); db.className=dn?'season-done-btn undone':'season-done-btn mark-done'; db.textContent=dn?'Undo':'Done'; }
-      const sel = page.querySelector('#detailStatusLabel');
-      if (sel) {
-        const cfgMap = { watching:{l:'Watching',c:'#00b894'}, completed:{l:'Completed',c:'#6c5ce7'}, on_hold:{l:'On-Hold',c:'#fdcb6e'}, dropped:{l:'Dropped',c:'#e17055'}, plan_to_watch:{l:'Plan to Watch',c:'#a29bfe'} };
-        const cfg = cfgMap[ns]; if (cfg) { sel.textContent = cfg.l; const dot = page.querySelector('#detailStatusBtn .dd-dot'); if (dot) dot.style.background = cfg.c; }
-      }
+      if (isAnime) Store.updateTvShowByMalId(show.malId,{seasons:ss,watchStatus:ns});
+      else Store.updateTvShow(tmdbId,{seasons:ss,watchStatus:ns,seasonStatuses});
+      App.refreshCounts();
+      DetailUI.open(tmdbId, 'tv', false);
+    };
+
+    list.addEventListener('click', e => {
+      const btn = e.target.closest('button'); if (!btn) return;
+      const sn = parseInt(btn.dataset.snum);
+      let show = Store.getTvShow(tmdbId);
+      if (!show) return;
+      const ss = show.seasons||[];
+      const si = ss.findIndex(s=>s.seasonNumber===sn); if (si===-1) return;
+      const s = ss[si]; const tot = s.episodeCount||0;
+      let newVal = s.episodesWatched || 0;
+      if (btn.classList.contains('ep-inc')) { newVal++; }
+      else if (btn.classList.contains('ep-dec')) { newVal--; }
+      else if (btn.classList.contains('season-done-btn')) { newVal = btn.classList.contains('mark-done') ? (tot > 0 ? tot : newVal) : 0; }
+      else return;
+      saveEpChange(sn, newVal);
+    });
+
+    // Editable episode input
+    list.querySelectorAll('.ep-counter-input').forEach(input => {
+      input.addEventListener('change', () => {
+        const sn = parseInt(input.dataset.snum);
+        const val = parseInt(input.value) || 0;
+        saveEpChange(sn, val);
+      });
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') input.blur();
+      });
+      // Prevent click from bubbling to season-info (which opens modal)
+      input.addEventListener('click', e => e.stopPropagation());
     });
   },
 
@@ -784,13 +1030,13 @@ const DetailUI = {
       genres: (stored.genres || []).map(g => typeof g === 'string' ? { name: g } : g),
       overview: '',
       runtime: stored.runtime || 0,
-      number_of_seasons: stored.totalSeasons || 0,
+      number_of_seasons: 1,
       number_of_episodes: stored.totalEpisodes || stored.episodes || 0,
       seasons: (stored.seasons || []).map(s => ({
         season_number: s.seasonNumber,
         episode_count: s.episodeCount || 0,
         poster_path: s.posterPath || null,
-        name: 'Season ' + s.seasonNumber,
+        name: stored.title || 'Season ' + s.seasonNumber,
       })),
       credits: { cast: [], crew: [] },
       videos: { results: [] },
@@ -805,6 +1051,7 @@ const DetailUI = {
       tagline: '',
       budget: 0,
       revenue: 0,
+      _malRelations: [], // Related anime (prequels, sequels, etc.) from Jikan
     };
 
     // Try to enrich with Jikan data if we have a malId
@@ -825,6 +1072,10 @@ const DetailUI = {
             if (anime.trailer?.images?.maximum_image_url) {
               d.backdrop_path = anime.trailer.images.maximum_image_url;
             }
+            // YouTube trailer from Jikan
+            if (anime.trailer?.youtube_id) {
+              d.videos = { results: [{ key: anime.trailer.youtube_id, type: 'Trailer', site: 'YouTube', name: 'Trailer' }] };
+            }
             d.genres = (anime.genres || []).concat(anime.themes || []).map(g => ({ name: g.name }));
             d.status = anime.status || '';
             if (anime.aired?.from) d.first_air_date = anime.aired.from.substring(0, 10);
@@ -834,14 +1085,69 @@ const DetailUI = {
             d.number_of_episodes = anime.episodes || d.number_of_episodes;
             d.production_companies = (anime.studios || []).map(s => ({ name: s.name }));
 
-            // Update stored poster if we got a better one
-            if (d.poster_path && d.poster_path.startsWith('http')) {
-              if (isMovie) Store.updateMovie(stored.tmdbId, { posterPath: d.poster_path, genres: d.genres.map(g => g.name), voteAverage: d.vote_average });
-              else Store.updateTvShow(stored.tmdbId, { posterPath: d.poster_path, genres: d.genres.map(g => g.name), voteAverage: d.vote_average });
+            // Update season episode count from Jikan if different
+            if (d.seasons.length > 0 && anime.episodes && anime.episodes !== d.seasons[0].episode_count) {
+              d.seasons[0].episode_count = anime.episodes;
+              d.seasons[0].name = stored.title || d.seasons[0].name;
+            }
+
+            // Extract related anime (prequels, sequels, etc.)
+            if (anime.relations && anime.relations.length) {
+              const validRelTypes = ['Prequel', 'Sequel', 'Alternative Version', 'Side Story', 'Spin-off', 'Parent Story', 'Summary', 'Full Story'];
+              for (const rel of anime.relations) {
+                if (!validRelTypes.includes(rel.relation)) continue;
+                for (const entry of (rel.entry || [])) {
+                  if (entry.type !== 'anime') continue;
+                  d._malRelations.push({
+                    malId: entry.mal_id,
+                    title: entry.name || entry.title || '',
+                    relation: rel.relation,
+                    url: entry.url || '',
+                  });
+                }
+              }
+            }
+
+            // Update stored data with Jikan info
+            const storeUpdates = { genres: d.genres.map(g => g.name), voteAverage: d.vote_average };
+            if (d.poster_path && d.poster_path.startsWith('http')) storeUpdates.posterPath = d.poster_path;
+            if (anime.episodes && stored.seasons && stored.seasons.length > 0) {
+              const ss = [...stored.seasons];
+              ss[0].episodeCount = anime.episodes;
+              storeUpdates.seasons = ss;
+              storeUpdates.totalEpisodes = anime.episodes;
+            }
+            if (stored.malId) {
+              if (isMovie) Store.updateMovie(stored.tmdbId, storeUpdates);
+              else Store.updateTvShowByMalId(stored.malId, storeUpdates);
             }
           }
         }
       } catch (e) { /* proceed with stored data only */ }
+    }
+
+    // Try to supplement with TMDB data for cast, backdrops, and recommendations
+    // Use malTmdbId (the matched TMDB ID) if available
+    const tmdbFallbackId = stored.malTmdbId || (stored.tmdbId > 0 ? stored.tmdbId : null);
+    if (tmdbFallbackId && TMDB.getKey()) {
+      try {
+        const tmdbData = isMovie
+          ? await TMDB.movieDetails(tmdbFallbackId)
+          : await TMDB.tvDetails(tmdbFallbackId);
+        if (tmdbData) {
+          // Use TMDB cast/crew if Jikan didn't provide any
+          if (tmdbData.credits) d.credits = tmdbData.credits;
+          // Use TMDB backdrop if Jikan trailer thumbnail wasn't available
+          if (!d.backdrop_path && tmdbData.backdrop_path) d.backdrop_path = tmdbData.backdrop_path;
+          // Use TMDB recommendations
+          if (tmdbData.recommendations) d.recommendations = tmdbData.recommendations;
+          // Use TMDB networks
+          if (tmdbData.networks) d.networks = tmdbData.networks;
+          // External IDs (IMDb)
+          if (tmdbData.external_ids) d.external_ids = tmdbData.external_ids;
+          if (tmdbData.imdb_id) d.imdb_id = tmdbData.imdb_id;
+        }
+      } catch (e) { /* TMDB is supplementary — non-fatal */ }
     }
 
     return d;
@@ -896,7 +1202,7 @@ const DetailUI = {
         </div>
       </div>`;
 
-    page.querySelector('#detailBackBtn').addEventListener('click', () => App.showPage(currentView || 'watchlist'));
+    page.querySelector('#detailBackBtn').addEventListener('click', () => { if (DetailUI._navHistory.length > 0) { const prev = DetailUI._navHistory.pop(); DetailUI.open(prev.tmdbId, prev.mediaType, false); } else { App.showPage(currentView || 'watchlist'); } });
     page.querySelector('#failedLinkBtn').addEventListener('click', () => this._manualSyncModal(tmdbId, isM ? 'movie' : 'tv', stored));
     page.querySelector('#failedRemoveBtn').addEventListener('click', () => {
       if (confirm('Remove "' + title + '" from your list?')) {
@@ -951,7 +1257,7 @@ const DetailUI = {
 
     const body = modal.querySelector('.modal-body');
     body.innerHTML = `
-      ${isAnime ? `<div class="season-note-banner">&#9432; MAL tracks each anime season as a separate entry, while TMDB groups them under one show. Season data shown here is from TMDB.</div>` : ''}
+      ${isAnime ? `<div class="season-note-banner">&#9432; Episode data from MyAnimeList. This is one entry in the MAL series — use Related to navigate between seasons.</div>` : ''}
       <div class="season-info-header">
         ${posterUrl ? `<div class="season-info-poster"><img src="${posterUrl}"></div>` : ''}
         <div class="season-info-meta">

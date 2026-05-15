@@ -99,8 +99,15 @@ const Store = {
   getTvShows() { return this._data.tvshows; },
 
   addTvShow(item) {
-    if (this._data.tvshows.find(t => t.tmdbId === item.tmdbId)) return false;
-    if (item.malId && this._data.tvshows.find(t => t.malId === item.malId)) return false;
+    // Anime entries from MAL are stored per-MAL-entry (each MAL season is separate).
+    // Allow multiple anime entries with the same TMDB ID but different MAL IDs.
+    if (item.sourceTag === 'anime' && item.malId) {
+      // Only block exact malId duplicates
+      if (this._data.tvshows.find(t => t.malId === item.malId)) return false;
+    } else {
+      if (this._data.tvshows.find(t => t.tmdbId === item.tmdbId)) return false;
+      if (item.malId && this._data.tvshows.find(t => t.malId === item.malId)) return false;
+    }
     if (!item._id) item._id = this._nextId++;
     this._data.tvshows.unshift(item);
     this._saveTvShows();
@@ -114,8 +121,22 @@ const Store = {
     this._saveTvShows();
   },
 
+  // Update by MAL ID — needed because multiple anime can share a TMDB ID
+  updateTvShowByMalId(malId, updates) {
+    const idx = this._data.tvshows.findIndex(t => t.malId === malId);
+    if (idx === -1) return;
+    Object.assign(this._data.tvshows[idx], updates, { dateUpdated: new Date().toISOString() });
+    this._saveTvShows();
+  },
+
   removeTvShow(tmdbId) {
     this._data.tvshows = this._data.tvshows.filter(t => t.tmdbId !== tmdbId);
+    this._saveTvShows();
+  },
+
+  // Remove by MAL ID — precise removal of a single anime entry
+  removeTvShowByMalId(malId) {
+    this._data.tvshows = this._data.tvshows.filter(t => t.malId !== malId);
     this._saveTvShows();
   },
 
@@ -123,8 +144,16 @@ const Store = {
     return this._data.tvshows.some(t => t.tmdbId === tmdbId);
   },
 
+  hasTvShowByMalId(malId) {
+    return this._data.tvshows.some(t => t.malId === malId);
+  },
+
   getTvShow(tmdbId) {
     return this._data.tvshows.find(t => t.tmdbId === tmdbId);
+  },
+
+  getTvShowByMalId(malId) {
+    return this._data.tvshows.find(t => t.malId === malId);
   },
 
   _saveTvShows() {
@@ -152,7 +181,11 @@ const Store = {
   getAvgUserRating(id, t) { const e = this._data.diary.filter(d => d.tmdbId === id && d.type === t && d.rating); return e.length ? e.reduce((s, d) => s + d.rating, 0) / e.length : null; },
 
   getActivity() { return this._data.activity; },
-  addActivity(entry) { this._data.activity.unshift(entry); chrome.storage.local.set({ activity: this._data.activity }); },
+  addActivity(entry) {
+    this._data.activity.unshift(entry);
+    if (this._data.activity.length > 500) this._data.activity = this._data.activity.slice(0, 500);
+    chrome.storage.local.set({ activity: this._data.activity });
+  },
 
   getAll() { return [...this._data.movies.map(m => ({ ...m, mediaType: 'movie' })), ...this._data.tvshows.map(t => ({ ...t, mediaType: 'tv' }))]; },
   deleteMovie(id) { this.removeMovie(id); },
@@ -364,7 +397,9 @@ const Store = {
             this._data.activity.unshift(a);
           }
         });
-        // No activity cap — unlimitedStorage enabled
+        if (this._data.activity.length > 500) {
+          this._data.activity = this._data.activity.slice(0, 500);
+        }
       }
     }
     this._saveMovies();

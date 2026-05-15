@@ -515,3 +515,53 @@ html, body {
   cursor: pointer; flex-shrink: 0; font-family: inherit;
 }
 .pdl-hdel:hover { color: var(--pdropped); background: rgba(225,112,85,0.1); }
+
+/* ─── Related Anime (popup) ─── */
+.pd-related-list { display: flex; flex-direction: column; gap: 3px; }
+.pd-related-card {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 10px; border-radius: 6px;
+  background: var(--pbg-1); border: 1px solid var(--pborder);
+  cursor: pointer; transition: all 0.15s;
+}
+.pd-related-card:hover { background: var(--pbg-2); border-color: var(--paccent-l); }
+.pd-related-type {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.03em; color: var(--paccent-l);
+  flex-shrink: 0; min-width: 52px;
+}
+.pd-related-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+}
+.pd-related-title {
+  font-size: 12px; color: var(--ptext-0);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ─── Per-season status select ─── */
+.pd-season-status-select {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  padding: 2px 4px; border-radius: 4px;
+  background: var(--pbg-1); border: 1px solid;
+  cursor: pointer; flex-shrink: 0; font-family: inherit;
+  appearance: auto; -webkit-appearance: auto;
+  outline: none; color: inherit;
+}
+.pd-season-status-select:focus { border-color: var(--paccent-l); }
+
+/* ─── Editable episode input ─── */
+.pd-ep-input {
+  width: 40px; text-align: center;
+  background: var(--pbg-1); border: 1px solid var(--pborder);
+  border-radius: 4px; color: var(--ptext-0);
+  font-size: 12px; font-weight: 700; font-family: inherit;
+  padding: 2px 4px; outline: none;
+  -moz-appearance: textfield;
+}
+.pd-ep-input::-webkit-outer-spin-button,
+.pd-ep-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pd-ep-input:focus { border-color: var(--paccent-l); }
+.pd-ep-total {
+  font-size: 11px; color: var(--ptext-2); font-weight: 600;
+  margin: 0 2px;
+}

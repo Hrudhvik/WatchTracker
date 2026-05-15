@@ -47,12 +47,35 @@ const App = {
     // Auto-scroll to top when navigating pages
     window.scrollTo({ top: 0, behavior: 'instant' });
   },
+  _lastScrollPos: {},
+
   showPage(name) {
+    // Save scroll position of current page before switching
+    const currentPage = document.querySelector('.page.active-page');
+    if (currentPage) {
+      this._lastScrollPos[currentPage.id] = currentPage.scrollTop;
+    }
+
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active-page'));
     const page = document.getElementById(`page-${name}`);
     if (page) {
       page.classList.add('active-page');
-      page.scrollTop = 0;
+      // Restore scroll position if returning to a list page, reset for detail
+      if (name === 'detail') {
+        page.scrollTop = 0;
+      } else if (this._lastScrollPos[page.id] !== undefined) {
+        page.scrollTop = this._lastScrollPos[page.id];
+      }
+    }
+    // Clear detail nav history when navigating away from detail view
+    if (name !== 'detail' && typeof DetailUI !== 'undefined') {
+      DetailUI._navHistory = [];
+      DetailUI._currentDetail = null;
+    }
+    // Hide alphabet rail when leaving watchlist
+    if (name !== 'watchlist') {
+      const rail = document.getElementById('alphaRail');
+      if (rail) rail.classList.remove('visible');
     }
     if (name === 'watchlist') ListUI.render();
     else if (name === 'profile') ProfileUI.render();

@@ -473,7 +473,10 @@ function bindDetailStatusDD(idPrefix, tmdbId, mediaType, title, posterPath) {
       dd.classList.remove('open'); menu.classList.add('hidden');
 
       const isM = mediaType === 'movie';
-      if (isM) Store.updateMovie(tmdbId, { watchStatus: val });
+      const show = !isM ? Store.getTvShow(tmdbId) : null;
+      const isAnimeEntry = show && show.sourceTag === 'anime' && show.malId;
+      if (isAnimeEntry) Store.updateTvShowByMalId(show.malId, { watchStatus: val });
+      else if (isM) Store.updateMovie(tmdbId, { watchStatus: val });
       else Store.updateTvShow(tmdbId, { watchStatus: val });
       Store.addActivity({ tmdbId, title, type: mediaType, posterPath, action: 'status_change', detail: `Changed to ${c.l}`, timestamp: new Date().toISOString() });
     });
@@ -511,42 +514,138 @@ async function showDetail(tmdbId, mediaType) {
 
   el.innerHTML = '<div class="p-search-msg">Loading...</div>';
 
+  const isAnime = stored.sourceTag === 'anime';
   const poster = TMDB.poster(stored.posterPath, 'w185');
   const genres = (stored.genres || []).slice(0, 4);
   const score = stored.voteAverage ? stored.voteAverage.toFixed(1) : '—';
-  const scoreLabel = stored.sourceTag === 'anime' ? 'MAL' : 'TMDB';
+  const scoreLabel = isAnime ? 'MAL' : 'TMDB';
 
   let seasonHtml = '';
   if (!isM) {
     const ss = stored.seasons || [];
     const totalEps = ss.reduce((s, x) => s + (x.episodeCount || 0), 0);
     const watchedEps = ss.reduce((s, x) => s + (x.episodesWatched || 0), 0);
-    seasonHtml = `<div class="pd-section"><div class="pd-section-label">Episode Progress (${watchedEps}/${totalEps})</div>
-      ${ss.map(s => {
-      const w = s.episodesWatched || 0, t = s.episodeCount || 0;
-      const pct = t > 0 ? Math.round(w / t * 100) : 0;
-      return `<div class="pd-ep-row"><span class="pd-ep-label">S${s.seasonNumber} (${t} eps)</span>
-          <div class="pd-ep-counter"><button class="pd-ep-btn" data-sn="${s.seasonNumber}" data-act="dec">-</button>
-            <div class="pd-ep-val">${w}/${t}</div>
-            <button class="pd-ep-btn" data-sn="${s.seasonNumber}" data-act="inc">+</button></div>
-        </div><div class="pd-season-bar"><div class="pd-season-bar-fill" style="width:${pct}%"></div></div>`;
-    }).join('')}</div>`;
+
+    if (isAnime) {
+      // Anime: single flat episode counter
+      seasonHtml = `<div class="pd-section"><div class="pd-section-label">Episode Progress (${watchedEps}/${totalEps || '?'})</div>
+        ${ss.map(s => {
+        const w = s.episodesWatched || 0, t = s.episodeCount || 0;
+        const unknownTotal = t === 0 && w > 0;
+        const pct = unknownTotal ? 90 : (t > 0 ? Math.round(w / t * 100) : 0);
+        const epDisplay = unknownTotal ? `${w}/?` : `${w}/${t}`;
+        const metaEps = unknownTotal ? '? eps' : `${t} eps`;
+        const barColor = stored.watchStatus === 'completed' ? 'var(--pcompleted)' : stored.watchStatus === 'on_hold' ? 'var(--phold)' : stored.watchStatus === 'dropped' ? 'var(--pdropped)' : 'var(--pwatching)';
+        return `<div class="pd-ep-row"><span class="pd-ep-label">${esc(stored.title)} (${metaEps})</span>
+            <div class="pd-ep-counter"><button class="pd-ep-btn" data-sn="${s.seasonNumber}" data-act="dec">-</button>
+              <input class="pd-ep-input" data-sn="${s.seasonNumber}" type="number" value="${w}" min="0" ${t > 0 ? `max="${t}"` : ''} style="width:${String(epDisplay).length * 8 + 16}px;">
+              <span class="pd-ep-total">/ ${t || '?'}</span>
+              <button class="pd-ep-btn" data-sn="${s.seasonNumber}" data-act="inc">+</button></div>
+          </div><div class="pd-season-bar"><div class="pd-season-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>`;
+      }).join('')}</div>`;
+    } else {
+      // TMDB TV: per-season progress with per-season status dropdown
+      const seasonStatuses = stored.seasonStatuses || {};
+      const seasonStatusColors = { watching:'#00b894', completed:'#6c5ce7', on_hold:'#fdcb6e', dropped:'#e17055', plan_to_watch:'#a29bfe', not_started:'#5c6180' };
+      const ssOpts = [
+        { val:'not_started', label:'—' }, { val:'watching', label:'Watching' },
+        { val:'completed', label:'Completed' }, { val:'on_hold', label:'On-Hold' },
+        { val:'dropped', label:'Dropped' }, { val:'plan_to_watch', label:'Plan' },
+      ];
+      seasonHtml = `<div class="pd-section"><div class="pd-section-label">Episode Progress (${watchedEps}/${totalEps || '?'})</div>
+        ${ss.map(s => {
+        const w = s.episodesWatched || 0, t = s.episodeCount || 0;
+        const unknownTotal = t === 0 && w > 0;
+        const pct = unknownTotal ? 90 : (t > 0 ? Math.round(w / t * 100) : 0);
+        const sStatus = seasonStatuses[s.seasonNumber] || (w >= t && t > 0 ? 'completed' : w > 0 ? 'watching' : 'not_started');
+        const sColor = seasonStatusColors[sStatus] || '#5c6180';
+        const barColor = sColor;
+        const epDisplay = unknownTotal ? `${w}/?` : `${w}/${t}`;
+        const metaEps = unknownTotal ? '? eps' : `${t} eps`;
+        return `<div class="pd-ep-row"><span class="pd-ep-label">S${s.seasonNumber} (${metaEps})</span>
+            <select class="pd-season-status-select" data-sn="${s.seasonNumber}" style="color:${sColor};border-color:${sColor}40;">
+              ${ssOpts.map(o => `<option value="${o.val}" ${o.val===sStatus?'selected':''}>${o.label}</option>`).join('')}
+            </select>
+            <div class="pd-ep-counter"><button class="pd-ep-btn" data-sn="${s.seasonNumber}" data-act="dec">-</button>
+              <input class="pd-ep-input" data-sn="${s.seasonNumber}" type="number" value="${w}" min="0" ${t > 0 ? `max="${t}"` : ''} style="width:${String(epDisplay).length * 8 + 16}px;">
+              <span class="pd-ep-total">/ ${t || '?'}</span>
+              <button class="pd-ep-btn" data-sn="${s.seasonNumber}" data-act="inc">+</button></div>
+          </div><div class="pd-season-bar"><div class="pd-season-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>`;
+      }).join('')}</div>`;
+    }
   }
 
   let movieInfo;
   if (isM) {
     const rt = stored.runtime ? `${Math.floor(stored.runtime / 60)}h ${stored.runtime % 60}m` : '';
     movieInfo = [stored.year, rt].filter(Boolean).join(' · ');
+  } else if (isAnime) {
+    movieInfo = [stored.year, `${stored.totalEpisodes || '?'} Eps`].filter(Boolean).join(' · ');
   } else {
     const ss = stored.seasons || [];
     movieInfo = [stored.year, `${stored.totalSeasons || ss.length} Seasons`, `${stored.totalEpisodes || '?'} Eps`].filter(Boolean).join(' · ');
   }
 
-  // Fetch extra details (overview, cast, imdbId) from TMDB if available
+  // Fetch extra details: Jikan-first for anime, TMDB for others
   let overview = '';
   let imdbId = stored.imdbId || null;
   let castHtml = '';
-  if (TMDB.getKey() && tmdbId > 0) {
+  let relatedHtml = '';
+
+  if (isAnime && stored.malId) {
+    // Fetch from Jikan
+    try {
+      const res = await fetch(`https://api.jikan.moe/v4/anime/${stored.malId}/full`);
+      if (res.ok) {
+        const jData = await res.json();
+        const anime = jData?.data;
+        if (anime) {
+          overview = (anime.synopsis || '').substring(0, 250) + ((anime.synopsis || '').length > 250 ? '...' : '');
+
+          // Build related anime section
+          const validRelTypes = ['Prequel', 'Sequel', 'Parent Story', 'Side Story', 'Spin-off', 'Alternative Version'];
+          const rels = [];
+          for (const rel of (anime.relations || [])) {
+            if (!validRelTypes.includes(rel.relation)) continue;
+            for (const entry of (rel.entry || [])) {
+              if (entry.type !== 'anime') continue;
+              rels.push({ malId: entry.mal_id, title: entry.name || '', relation: rel.relation });
+            }
+          }
+          if (rels.length) {
+            const relOrder = ['Prequel', 'Sequel', 'Parent Story', 'Side Story', 'Spin-off', 'Alternative Version'];
+            rels.sort((a, b) => (relOrder.indexOf(a.relation) === -1 ? 99 : relOrder.indexOf(a.relation)) - (relOrder.indexOf(b.relation) === -1 ? 99 : relOrder.indexOf(b.relation)));
+            relatedHtml = `<div class="pd-section"><div class="pd-section-label">Related</div><div class="pd-related-list">${rels.map(r => {
+              const inStore = Store.getTvShowByMalId(r.malId) || Store.getMovies().find(m => m.malId === r.malId);
+              const dotColor = inStore ? ({ completed:'var(--pwatching)', watching:'var(--paccent-l)', dropped:'var(--pdropped)' }[inStore.watchStatus] || 'var(--ptext-2)') : 'transparent';
+              return `<div class="pd-related-card" data-rel-mal="${r.malId}">
+                <span class="pd-related-type">${esc(r.relation)}</span>
+                <span class="pd-related-dot" style="background:${dotColor};${dotColor === 'transparent' ? 'border:1.5px solid var(--ptext-2);' : ''}"></span>
+                <span class="pd-related-title">${esc(r.title)}</span>
+              </div>`;
+            }).join('')}</div></div>`;
+          }
+        }
+      }
+    } catch (e) { /* non-fatal */ }
+
+    // Supplement with TMDB data for cast
+    const tmdbFallbackId = stored.malTmdbId || (tmdbId > 0 ? tmdbId : null);
+    if (tmdbFallbackId && TMDB.getKey()) {
+      try {
+        const d = isM ? await TMDB.movieDetails(tmdbFallbackId) : await TMDB.tvDetails(tmdbFallbackId);
+        if (!overview && d.overview) overview = (d.overview || '').substring(0, 250) + ((d.overview || '').length > 250 ? '...' : '');
+        if (!imdbId) imdbId = isM ? (d.imdb_id || null) : (d.external_ids?.imdb_id || null);
+        const cast = (d.credits?.cast || []).slice(0, 6);
+        if (cast.length) {
+          castHtml = `<div class="pd-section"><div class="pd-section-label">Cast</div><div class="pd-cast-row">${cast.map(c => {
+            const ph = TMDB.profile(c.profile_path, 'w92');
+            return `<div class="pd-cast-card">${ph ? `<img src="${ph}" class="pd-cast-img">` : `<div class="pd-cast-ph"></div>`}<div class="pd-cast-name">${esc(c.name)}</div><div class="pd-cast-char">${esc(c.character || '')}</div></div>`;
+          }).join('')}</div></div>`;
+        }
+      } catch (e) { /* non-fatal */ }
+    }
+  } else if (TMDB.getKey() && tmdbId > 0) {
     try {
       const d = isM ? await TMDB.movieDetails(tmdbId) : await TMDB.tvDetails(tmdbId);
       overview = (d.overview || '').substring(0, 250) + ((d.overview || '').length > 250 ? '...' : '');
@@ -579,7 +678,7 @@ async function showDetail(tmdbId, mediaType) {
           ${stored.rewatchCount ? `<div><div class="pd-stat-val">${stored.rewatchCount}</div><div class="pd-stat-label">Rewatches</div></div>` : ''}
         </div>
         <div class="pd-links">
-          <a href="https://www.themoviedb.org/${isM ? 'movie' : 'tv'}/${Math.abs(tmdbId)}" target="_blank">&#8599; TMDB</a>
+          ${!isAnime ? `<a href="https://www.themoviedb.org/${isM ? 'movie' : 'tv'}/${Math.abs(tmdbId)}" target="_blank">&#8599; TMDB</a>` : ''}
           ${imdbId ? `<a href="https://www.imdb.com/title/${imdbId}" target="_blank">&#8599; IMDb</a>` : ''}
           ${stored.malId ? `<a href="https://myanimelist.net/anime/${stored.malId}" target="_blank">&#8599; MAL</a>` : ''}
         </div>
@@ -596,12 +695,56 @@ async function showDetail(tmdbId, mediaType) {
       <button class="pd-btn pd-btn-diary" id="pdDiaryLog">Diary</button>
       <button class="pd-btn pd-btn-remove" id="pdRemove">Remove</button>
     </div>
+    ${relatedHtml}
   </div>`;
 
   // Bind custom status dropdown
   bindDetailStatusDD('pdSt', tmdbId, mediaType, stored.title, stored.posterPath);
 
-  // Episode +/-
+  // Episode +/- (in-place update, no re-render)
+  const updateEpInPlace = (sn, newVal) => {
+    const show = Store.getTvShow(tmdbId); if (!show) return;
+    const isAnimeEntry = show.sourceTag === 'anime' && show.malId;
+    const ss = show.seasons || [];
+    const s = ss.find(x => x.seasonNumber === sn); if (!s) return;
+    const t = s.episodeCount || 0;
+    const clamped = t > 0 ? Math.max(0, Math.min(newVal, t)) : Math.max(0, newVal);
+    s.episodesWatched = clamped;
+
+    const seasonStatuses = show.seasonStatuses || {};
+    const sDone = clamped >= t && t > 0;
+    if (sDone && (!seasonStatuses[sn] || seasonStatuses[sn] === 'watching' || seasonStatuses[sn] === 'not_started')) {
+      seasonStatuses[sn] = 'completed';
+      const nextS = ss.find(x => x.seasonNumber === sn + 1);
+      if (nextS && (!seasonStatuses[sn+1] || seasonStatuses[sn+1] === 'not_started')) seasonStatuses[sn+1] = 'watching';
+    } else if (clamped > 0 && !sDone && (!seasonStatuses[sn] || seasonStatuses[sn] === 'not_started')) {
+      seasonStatuses[sn] = 'watching';
+    }
+    const allDone = ss.every(x => x.episodesWatched >= (x.episodeCount || 0) && (x.episodeCount || 0) > 0);
+    const anyStarted = ss.some(x => x.episodesWatched > 0);
+    let ns = show.watchStatus;
+    if (allDone) ns = 'completed';
+    else if (anyStarted && ns === 'plan_to_watch') ns = 'watching';
+    if (isAnimeEntry) Store.updateTvShowByMalId(show.malId, { seasons: ss, watchStatus: ns });
+    else Store.updateTvShow(tmdbId, { seasons: ss, watchStatus: ns, seasonStatuses });
+
+    // In-place DOM update
+    const input = el.querySelector(`.pd-ep-input[data-sn="${sn}"]`);
+    if (input && input !== document.activeElement) input.value = clamped;
+    const unknownTotal = t === 0 && clamped > 0;
+    const pct = unknownTotal ? 90 : (t > 0 ? Math.round(clamped / t * 100) : 0);
+    const bar = el.querySelector(`.pd-season-bar-fill`);
+    // Find the bar that corresponds to this season
+    const rows = el.querySelectorAll('.pd-ep-row');
+    rows.forEach((row, i) => {
+      const rowSn = row.querySelector('.pd-ep-btn')?.dataset.sn;
+      if (parseInt(rowSn) === sn) {
+        const barEl = row.nextElementSibling?.querySelector('.pd-season-bar-fill');
+        if (barEl) barEl.style.width = `${pct}%`;
+      }
+    });
+  };
+
   el.querySelectorAll('.pd-ep-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const sn = parseInt(btn.dataset.sn), act = btn.dataset.act;
@@ -609,16 +752,62 @@ async function showDetail(tmdbId, mediaType) {
       const ss = show.seasons || [];
       const s = ss.find(x => x.seasonNumber === sn); if (!s) return;
       const t = s.episodeCount || 0;
-      if (act === 'inc' && s.episodesWatched < t) s.episodesWatched++;
-      else if (act === 'dec' && s.episodesWatched > 0) s.episodesWatched--;
+      let newVal = s.episodesWatched || 0;
+      if (act === 'inc') newVal++;
+      else if (act === 'dec') newVal--;
       else return;
-      const allDone = ss.every(x => x.episodesWatched >= (x.episodeCount || 0) && (x.episodeCount || 0) > 0);
-      const anyStarted = ss.some(x => x.episodesWatched > 0);
-      let ns = show.watchStatus;
-      if (allDone) ns = 'completed';
-      else if (anyStarted && ns === 'plan_to_watch') ns = 'watching';
-      Store.updateTvShow(tmdbId, { seasons: ss, watchStatus: ns });
+      updateEpInPlace(sn, newVal);
+    });
+  });
+
+  // Editable episode input
+  el.querySelectorAll('.pd-ep-input').forEach(input => {
+    input.addEventListener('change', () => {
+      const sn = parseInt(input.dataset.sn);
+      const val = parseInt(input.value) || 0;
+      updateEpInPlace(sn, val);
+    });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { input.blur(); }
+    });
+  });
+
+  // Per-season status select dropdown (TMDB TV only)
+  el.querySelectorAll('.pd-season-status-select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const sn = parseInt(sel.dataset.sn);
+      const val = sel.value;
+      const show = Store.getTvShow(tmdbId); if (!show) return;
+      const ss = show.seasons || [];
+      const seasonStatuses = show.seasonStatuses || {};
+      seasonStatuses[sn] = val;
+      // Cascade logic
+      let newShowStatus = show.watchStatus;
+      if (val === 'dropped') newShowStatus = 'dropped';
+      else if (val === 'on_hold') newShowStatus = 'on_hold';
+      else if (val === 'completed') {
+        const nextS = ss.find(x => x.seasonNumber === sn + 1);
+        if (nextS && (!seasonStatuses[sn+1] || seasonStatuses[sn+1] === 'not_started')) seasonStatuses[sn+1] = 'watching';
+        const allCompleted = ss.every(x => (seasonStatuses[x.seasonNumber] || 'not_started') === 'completed');
+        newShowStatus = allCompleted ? 'completed' : 'watching';
+      } else if (val === 'watching') newShowStatus = 'watching';
+      Store.updateTvShow(tmdbId, { seasonStatuses, watchStatus: newShowStatus });
       showDetail(tmdbId, mediaType);
+    });
+  });
+
+  // Related anime navigation
+  el.querySelectorAll('.pd-related-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const relMal = parseInt(card.dataset.relMal);
+      const inStore = Store.getTvShowByMalId(relMal) || Store.getMovies().find(m => m.malId === relMal);
+      if (inStore) {
+        showDetail(inStore.tmdbId, inStore.mediaType || 'tv');
+      } else {
+        // Not in library — open full dashboard to the anime detail page
+        chrome.tabs.create({ url: chrome.runtime.getURL('app.html') + `#detail-tv-${-relMal}` });
+        window.close();
+      }
     });
   });
 
@@ -868,7 +1057,7 @@ function getPct(i) {
   if (i.mediaType === 'tv') {
     const ss = i.seasons || []; const w = ss.reduce((s, se) => s + (se.episodesWatched || 0), 0);
     const t = ss.reduce((s, se) => s + (se.episodeCount || 0), 0);
-    return t > 0 ? Math.round(w / t * 100) : 0;
+    return t === 0 && w > 0 ? 90 : (t > 0 ? Math.round(w / t * 100) : 0);
   }
   return i.watchStatus === 'completed' ? 100 : i.watchStatus === 'watching' ? 40 : 0;
 }

@@ -245,7 +245,9 @@ const SyncEngine = {
           posterPath: entry.images?.jpg?.large_image_url || entry.images?.jpg?.image_url || '',
           type: isMovie ? 'movie' : 'tv',
           episodes: entry.episodes || 0,
-          episodesWatched: item.episodes_watched || 0,
+          // Fix: Jikan sometimes returns 0 for completed entries — fill from total
+          episodesWatched: (item.episodes_watched || 0) > 0 ? item.episodes_watched
+            : (watchStatus === 'completed' && entry.episodes > 0 ? entry.episodes : 0),
           score: item.score || null,
           rating: item.score || null,
           watchStatus,
@@ -714,39 +716,49 @@ const SyncEngine = {
 
       if (isMal) {
         // MAL entries: use MAL data directly
-        if (entry.matched && entry.tmdbId) {
-          storeId = entry.tmdbId;
-        } else if (entry.malId) {
-          storeId = -entry.malId; // Negative ID = MAL-only entry
-        } else {
-          skipped++; continue;
-        }
         isMovie = entry.type === 'movie';
         poster = entry.posterPath || entry.tmdbPoster || null;
         sourceTag = 'anime';
 
-        // If a Letterboxd/TMDB entry already exists for this anime, remove it
-        // so the MAL version replaces it cleanly (MAL has better anime data)
-        if (entry.tmdbId && entry.tmdbId > 0) {
-          const existingTmdb = isMovie ? Store.getMovie(entry.tmdbId) : Store.getTvShow(entry.tmdbId);
-          if (existingTmdb && existingTmdb.sourceTag !== 'anime') {
-            // Migrate diary & activity before removing
-            Store.migrateTmdbId(entry.tmdbId, storeId, isMovie ? 'movie' : 'tv');
-            if (isMovie) Store.removeMovie(entry.tmdbId);
-            else Store.removeTvShow(entry.tmdbId);
+        if (isMovie) {
+          // Movies: use TMDB ID if matched, else negative MAL ID
+          if (entry.matched && entry.tmdbId) {
+            storeId = entry.tmdbId;
+          } else if (entry.malId) {
+            storeId = -entry.malId;
+          } else {
+            skipped++; continue;
           }
 
-          // If this entry was previously stored with a negative MAL-only ID, migrate to TMDB ID
+          // Replace non-anime Letterboxd entry for the same movie
+          if (entry.tmdbId && entry.tmdbId > 0) {
+            const existingTmdb = Store.getMovie(entry.tmdbId);
+            if (existingTmdb && existingTmdb.sourceTag !== 'anime') {
+              Store.migrateTmdbId(entry.tmdbId, storeId, 'movie');
+              Store.removeMovie(entry.tmdbId);
+            }
+          }
+        } else {
+          // TV: ALWAYS use -malId so each MAL anime season is a separate entry.
+          // Multiple MAL seasons (e.g. Attack on Titan S1, S2, S3) stay independent
+          // even if they all map to the same TMDB show.
           if (entry.malId) {
-            const oldNegId = -entry.malId;
-            const oldEntry = isMovie ? Store.getMovie(oldNegId) : Store.getTvShow(oldNegId);
-            if (oldEntry) {
-              Store.migrateTmdbId(oldNegId, storeId, isMovie ? 'movie' : 'tv');
-              if (isMovie) Store.removeMovie(oldNegId);
-              else Store.removeTvShow(oldNegId);
+            storeId = -entry.malId;
+          } else {
+            skipped++; continue;
+          }
+
+          // Migrate from old positive TMDB ID to new -malId if a previous sync stored it that way
+          if (entry.matched && entry.tmdbId && entry.tmdbId > 0) {
+            const existingTmdb = Store.getTvShow(entry.tmdbId);
+            if (existingTmdb && existingTmdb.sourceTag !== 'anime') {
+              // Non-anime entry exists for this TMDB ID — remove it, MAL takes priority
+              Store.migrateTmdbId(entry.tmdbId, storeId, 'tv');
+              Store.removeTvShow(entry.tmdbId);
             }
           }
         }
+
         // Also check by normalized title if storeId is negative
         if (storeId < 0) {
           const normTitle = (entry.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -776,7 +788,10 @@ const SyncEngine = {
         sourceTag = 'tmdb';
       }
 
-      const exists = isMovie ? Store.hasMovie(storeId) : Store.hasTvShow(storeId);
+      // For anime TV shows, check existence by malId (since storeId = -malId and multiple can share a TMDB ID)
+      const isMalTv = isMal && !isMovie && entry.malId;
+      const exists = isMalTv ? Store.hasTvShowByMalId(entry.malId)
+        : (isMovie ? Store.hasMovie(storeId) : Store.hasTvShow(storeId));
       if (exists && mode === 'skip') { skipped++; continue; }
 
       if (!exists) {
@@ -807,24 +822,42 @@ const SyncEngine = {
             _syncOriginalYear: entry.year || null,
           });
         } else {
-          const epsWatched = entry.episodesWatched || 0;
+          let epsWatched = entry.episodesWatched || 0;
+          const totalEps = entry.episodes || 0;
+
+          // Fix: for completed anime, MAL APIs sometimes return 0 episodes watched.
+          // If completed and total episodes known, assume all were watched.
+          if (entry.watchStatus === 'completed' && epsWatched === 0 && totalEps > 0) {
+            epsWatched = totalEps;
+          }
+
+          // For anime TV: create a single flat season matching MAL's episode count
+          const animeSeason = isMal ? [{
+            seasonNumber: 1,
+            episodeCount: totalEps,
+            episodesWatched: epsWatched,
+            rewatchCount: 0,
+          }] : [];
+
           Store.addTvShow({
             tmdbId: storeId,
             malId: entry.malId || null,
+            // Store the matched TMDB ID separately so we can use it for fallback data (cast, backdrops)
+            malTmdbId: (isMal && entry.matched && entry.tmdbId) ? entry.tmdbId : null,
             title,
             posterPath: poster,
             backdropPath: null,
             year: entry.tmdbYear || entry.year || 0,
             voteAverage: entry.tmdbRating || 0,
-            totalSeasons: 0,
-            totalEpisodes: entry.episodes || 0,
+            totalSeasons: isMal ? 1 : 0,
+            totalEpisodes: totalEps,
             genres: [],
             watchStatus: entry.watchStatus || 'completed',
             rewatchCount: entry.timesWatched || 0,
             rewatchHistory: [],
             startDate: entry.startDate || '',
             endDate: entry.watchDate || '',
-            seasons: [],
+            seasons: animeSeason,
             _syncEpisodesWatched: epsWatched,
             dateAdded: now,
             dateUpdated: now,
@@ -835,9 +868,14 @@ const SyncEngine = {
           });
         }
         added++;
-        // Only enrich from TMDB if we have a real (positive) TMDB ID
-        if (storeId > 0) {
+        // Only enrich from TMDB if we have a real (positive) TMDB ID and it's NOT an anime TV show
+        // (anime TV shows get their data from Jikan/MAL instead)
+        if (storeId > 0 && !(isMal && !isMovie)) {
           newEntryIds.push(storeId + ':' + (isMovie ? 'movie' : 'tv'));
+        }
+        // Anime movies with positive TMDB IDs still get TMDB enrichment
+        if (isMal && isMovie && entry.matched && entry.tmdbId && entry.tmdbId > 0) {
+          newEntryIds.push(entry.tmdbId + ':movie');
         }
         Store.addActivity({
           tmdbId: storeId, title,
@@ -850,12 +888,35 @@ const SyncEngine = {
         if (entry.watchStatus) updates.watchStatus = entry.watchStatus;
         if (poster) updates.posterPath = poster;
         
-        const existingMedia = isMovie ? Store.getMovie(storeId) : Store.getTvShow(storeId);
+        // For anime TV, update episodes watched in the flat season
+        if (isMalTv) {
+          let mergeEps = entry.episodesWatched || 0;
+          const mergeTotalEps = entry.episodes || 0;
+          // Fix: completed anime with 0 watched → assume all watched
+          if (entry.watchStatus === 'completed' && mergeEps === 0 && mergeTotalEps > 0) {
+            mergeEps = mergeTotalEps;
+          }
+          if (mergeEps > 0) {
+            const existingAnime = Store.getTvShowByMalId(entry.malId);
+            if (existingAnime) {
+              const ss = existingAnime.seasons || [];
+              if (ss.length > 0) {
+                ss[0].episodesWatched = Math.max(ss[0].episodesWatched || 0, mergeEps);
+                if (mergeTotalEps > 0) ss[0].episodeCount = mergeTotalEps;
+                updates.seasons = ss;
+              }
+            }
+          }
+        }
+
+        const existingMedia = isMalTv ? Store.getTvShowByMalId(entry.malId)
+          : (isMovie ? Store.getMovie(storeId) : Store.getTvShow(storeId));
         if (existingMedia && entry.timesWatched !== undefined && entry.timesWatched > (existingMedia.rewatchCount || 0)) {
           updates.rewatchCount = entry.timesWatched;
         }
         
-        if (isMovie) Store.updateMovie(storeId, updates);
+        if (isMalTv) Store.updateTvShowByMalId(entry.malId, updates);
+        else if (isMovie) Store.updateMovie(storeId, updates);
         else Store.updateTvShow(storeId, updates);
         updated++;
       }
@@ -897,7 +958,8 @@ const SyncEngine = {
           diaryAdded++;
           
           if (entry.isRewatch) {
-            const existingMedia = isMovie ? Store.getMovie(storeId) : Store.getTvShow(storeId);
+            const existingMedia = isMalTv ? Store.getTvShowByMalId(entry.malId)
+              : (isMovie ? Store.getMovie(storeId) : Store.getTvShow(storeId));
             if (existingMedia) {
               const newCount = (existingMedia.rewatchCount || 0) + 1;
               const history = existingMedia.rewatchHistory || [];
@@ -905,7 +967,8 @@ const SyncEngine = {
               if (!history.some(h => h.date === entry.watchDate)) {
                 history.push({ date: entry.watchDate, note: 'Synced rewatch' });
                 const rwUpdates = { rewatchCount: newCount, rewatchHistory: history };
-                if (isMovie) Store.updateMovie(storeId, rwUpdates);
+                if (isMalTv) Store.updateTvShowByMalId(entry.malId, rwUpdates);
+                else if (isMovie) Store.updateMovie(storeId, rwUpdates);
                 else Store.updateTvShow(storeId, rwUpdates);
               }
             }
@@ -1266,6 +1329,12 @@ const MalOAuth = {
         const titleEn = node.alternative_titles?.en || '';
         const displayTitle = (useEnglish && titleEn) ? titleEn : node.title;
 
+        const rawEpsWatched = status.num_episodes_watched || 0;
+        const totalEps = node.num_episodes || 0;
+        // Fix: MAL API sometimes returns 0 for completed entries — fill from total
+        const epsWatched = rawEpsWatched > 0 ? rawEpsWatched
+          : (watchStatus === 'completed' && totalEps > 0 ? totalEps : 0);
+
         entries.push({
           source: 'mal-oauth',
           malId: node.id,
@@ -1274,8 +1343,8 @@ const MalOAuth = {
           titleEnglish: titleEn,
           posterPath: poster,
           type: isMovie ? 'movie' : 'tv',
-          episodes: node.num_episodes || 0,
-          episodesWatched: status.num_episodes_watched || 0,
+          episodes: totalEps,
+          episodesWatched: epsWatched,
           score: status.score || null,
           rating: status.score > 0 ? status.score : null,
           watchStatus,

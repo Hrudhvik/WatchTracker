@@ -184,7 +184,25 @@ const ListUI = {
       const posterHtml = poster ? `<img src="${poster}" loading="lazy" class="poster-img">` : `<div class="no-poster-ph">${ph}</div>`;
       const pips = m.mediaType === 'tv' && (m.seasons||[]).length ? `<div class="season-pips">${(m.seasons||[]).map(s => {
         const w = s.episodesWatched||0, t = s.episodeCount||0;
-        return `<div class="season-pip ${w>=t&&t>0?'pip-done':w>0?'pip-active':''}"></div>`;
+        const done = w>=t&&t>0;
+        const active = w>0 && !done;
+        const unknownActive = t===0 && w>0;
+        const sStatuses = m.seasonStatuses || {};
+        const hasExplicitStatus = sStatuses[s.seasonNumber] !== undefined;
+        // If no explicit per-season status, use show-level status for active seasons
+        let sst;
+        if (hasExplicitStatus) {
+          sst = sStatuses[s.seasonNumber];
+        } else if (done) {
+          sst = 'completed';
+        } else if (active || unknownActive) {
+          // Use show-level status for color when no per-season override
+          sst = m.watchStatus || 'watching';
+        } else {
+          sst = 'not_started';
+        }
+        const cls = sst === 'completed' ? 'pip-done' : sst === 'watching' ? 'pip-active' : sst === 'on_hold' ? 'pip-hold' : sst === 'dropped' ? 'pip-dropped' : sst === 'plan_to_watch' ? 'pip-plan' : '';
+        return `<div class="season-pip ${cls}"></div>`;
       }).join('')}</div>` : '';
       const alphaAttr = this._getLetterAttr(m.title, idx > 0 ? items[idx-1].title : null);
       return `<div class="grid-card"${alphaAttr} data-tmdb="${m.tmdbId}" data-type="${m.mediaType}">
@@ -220,8 +238,11 @@ const ListUI = {
         const ss = m.seasons||[];
         const w = ss.reduce((s,x)=>s+(x.episodesWatched||0),0);
         const t = ss.reduce((s,x)=>s+(x.episodeCount||0),0);
-        const pct = t > 0 ? Math.round(w/t*100) : 0;
-        progHtml = `<div class="card-progress"><div class="card-progress-bar"><div class="card-progress-fill" style="width:${pct}%;background:${sc[m.watchStatus]||'var(--accent)'}"></div></div><span class="card-progress-text">${w}/${t}</span></div>`;
+        const unknownTotal = t === 0 && w > 0;
+        const pct = unknownTotal ? 90 : (t > 0 ? Math.round(w/t*100) : 0);
+        const barColor = sc[m.watchStatus]||'var(--accent)';
+        const epDisplay = unknownTotal ? `${w}/?` : `${w}/${t}`;
+        progHtml = `<div class="card-progress"><div class="card-progress-bar"><div class="card-progress-fill" style="width:${pct}%;background:${barColor}"></div></div><span class="card-progress-text">${epDisplay}</span></div>`;
       } else {
         progHtml = m.watchStatus === 'completed' ? '<div class="card-progress"><div class="card-progress-bar"><div class="card-progress-fill" style="width:100%;background:var(--completed)"></div></div></div>' : '';
       }

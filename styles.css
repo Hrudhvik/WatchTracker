@@ -339,8 +339,11 @@ kbd {
   border-radius: 2px;
   background: var(--bg-4);
 }
-.season-pip.pip-done { background: var(--watching); }
-.season-pip.pip-active { background: var(--accent-light); }
+.season-pip.pip-done { background: var(--completed); }
+.season-pip.pip-active { background: var(--watching); }
+.season-pip.pip-hold { background: var(--on-hold); }
+.season-pip.pip-dropped { background: var(--dropped); }
+.season-pip.pip-plan { background: var(--plan); }
 
 /* ═══ WATCHLIST ═══ */
 .list-tabs-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px}.list-tabs{display:flex;gap:2px;flex-wrap:wrap}.list-tab{display:flex;align-items:center;gap:6px;padding:7px 14px;background:none;border:1px solid transparent;border-radius:8px;color:var(--text-2);font-family:var(--font);font-size:12px;font-weight:600;cursor:pointer;transition:all var(--transition);white-space:nowrap}.list-tab:hover{color:var(--text-0);background:var(--bg-2)}.list-tab.active{color:var(--text-0);background:var(--bg-3);border-color:var(--border-active)}.tab-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}.tab-count{font-family:var(--mono);font-size:10px;color:var(--text-3);margin-left:2px}.list-tabs-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
@@ -985,6 +988,38 @@ kbd {
   color: var(--text-0);
   min-width: 60px;
   justify-content: center;
+}
+.ep-counter-input {
+  height: 30px;
+  width: 50px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-left: none;
+  border-right: none;
+  color: var(--text-0);
+  outline: none;
+  -moz-appearance: textfield;
+}
+.ep-counter-input::-webkit-outer-spin-button,
+.ep-counter-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.ep-counter-input:focus { background: var(--bg-3); border-color: var(--accent-light); }
+.ep-counter-total {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  padding: 0 6px 0 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--bg-2);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
 }
 
 .season-done-btn {
@@ -2747,45 +2782,41 @@ kbd {
 /* Alphabet rail for A-Z sort */
 .alpha-rail {
   position: fixed;
-  right: 6px;
+  right: 4px;
   top: 50%;
   transform: translateY(-50%);
-  display: flex;
+  display: none;
   flex-direction: column;
   align-items: center;
-  gap: 0;
+  gap: 1px;
   z-index: 80;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease;
 }
 .alpha-rail.visible {
-  opacity: 1;
-  pointer-events: auto;
+  display: flex;
 }
 .alpha-letter {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   font-family: var(--mono);
   color: var(--text-3);
-  width: 22px;
-  height: 18px;
+  width: 20px;
+  height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 3px;
   cursor: default;
   user-select: none;
-  transition: all 0.12s;
+  -webkit-tap-highlight-color: transparent;
 }
 .alpha-letter.has-items {
   color: var(--text-1);
   cursor: pointer;
 }
-.alpha-letter.has-items:hover {
+.alpha-letter.has-items:hover,
+.alpha-letter.has-items:active {
   color: var(--accent-light);
   background: var(--accent-glow);
-  transform: scale(1.3);
 }
 
 /* ═══════════════════════════════════════════
@@ -2947,4 +2978,75 @@ kbd {
   color: var(--text-3);
   font-size: 14px;
   pointer-events: none;
+}
+
+/* ─── Per-Season Status Select (native) ─── */
+.season-status-select {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--bg-3);
+  border: 1px solid;
+  cursor: pointer;
+  font-family: var(--font);
+  outline: none;
+  appearance: auto;
+  -webkit-appearance: auto;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.season-status-select:focus {
+  border-color: var(--accent-light);
+}
+
+/* ─── Related Anime (Prequel/Sequel navigation) ─── */
+.mal-relations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mal-relation-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mal-relation-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.mal-relation-card:hover {
+  background: var(--bg-3);
+  border-color: var(--accent-light);
+  transform: translateX(2px);
+}
+.mal-relation-type {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent-light);
+}
+.mal-relation-title {
+  font-size: 13px;
+  color: var(--text-0);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mal-relation-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
 }
