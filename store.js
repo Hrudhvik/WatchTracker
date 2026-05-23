@@ -3,7 +3,7 @@
    ═══════════════════════════════════════════ */
 
 const Store = {
-  _data: { apiKey: '', omdbKey: '', movies: [], tvshows: [], diary: [], activity: [], theme: null, popupPrefs: null },
+  _data: { apiKey: '', omdbKey: '', movies: [], tvshows: [], diary: [], activity: [], theme: null, popupPrefs: null, letterboxdWidgetEnabled: true },
   _nextId: 1,
 
   _assignIds() {
@@ -18,7 +18,7 @@ const Store = {
 
   async load() {
     return new Promise(resolve => {
-      chrome.storage.local.get(['apiKey', 'omdbKey', 'movies', 'tvshows', 'diary', 'activity', 'theme', 'popupPrefs'], d => {
+      chrome.storage.local.get(['apiKey', 'omdbKey', 'movies', 'tvshows', 'diary', 'activity', 'theme', 'popupPrefs', 'letterboxdWidgetEnabled'], d => {
         this._data.apiKey = d.apiKey || '';
         this._data.omdbKey = d.omdbKey || '';
         this._data.movies = d.movies || [];
@@ -27,6 +27,7 @@ const Store = {
         this._data.activity = d.activity || [];
         this._data.theme = d.theme || null;
         this._data.popupPrefs = d.popupPrefs || null;
+        this._data.letterboxdWidgetEnabled = d.letterboxdWidgetEnabled !== false;
         this._assignIds();
         resolve(this._data);
       });
@@ -202,6 +203,11 @@ const Store = {
   setTheme(t) { this._data.theme = t; chrome.storage.local.set({ theme: t }); },
   getPopupPrefs() { return this._data.popupPrefs; },
   setPopupPrefs(p) { this._data.popupPrefs = p; chrome.storage.local.set({ popupPrefs: p }); },
+  getLetterboxdWidgetEnabled() { return this._data.letterboxdWidgetEnabled !== false; },
+  setLetterboxdWidgetEnabled(enabled) {
+    this._data.letterboxdWidgetEnabled = enabled !== false;
+    chrome.storage.local.set({ letterboxdWidgetEnabled: this._data.letterboxdWidgetEnabled });
+  },
 
   migrateTmdbId(oldId, newId, type) {
     if (type === 'movie') {

@@ -95,7 +95,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const key = Store.getApiKey();
   if (key) { TMDB.setKey(key); document.getElementById('apiKeyInput').value = key; }
   const omdbKey = Store.getOmdbKey ? Store.getOmdbKey() : '';
-  if (omdbKey && window.OMDB) { OMDB.setKey(omdbKey); const oi = document.getElementById('omdbKeyInput'); if (oi) oi.value = omdbKey; }
+  const omdbInput = document.getElementById('omdbKeyInput');
+  if (omdbInput) omdbInput.value = omdbKey || '';
+  if (omdbKey && window.OMDB) OMDB.setKey(omdbKey);
+  if (window.MalOAuth && MalOAuth.getClientId) {
+    const malInput = document.getElementById('malClientId');
+    if (malInput) malInput.value = MalOAuth.getClientId() || '';
+  }
+  const lbWidgetToggle = document.getElementById('letterboxdWidgetToggle');
+  if (lbWidgetToggle) lbWidgetToggle.checked = Store.getLetterboxdWidgetEnabled ? Store.getLetterboxdWidgetEnabled() : true;
 
   App.refreshCounts();
   ListUI.init();
@@ -260,8 +268,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('saveApiKey').addEventListener('click', () => {
     const k = document.getElementById('apiKeyInput').value.trim();
     if (!k) { toast('Enter an API key'); return; }
-    Store.setApiKey(k); TMDB.setKey(k); toast('API key saved!');
-    document.getElementById('settingsModal').classList.add('hidden');
+    Store.setApiKey(k); TMDB.setKey(k); toast('TMDB API key saved!');
+  });
+
+  const clearApiKeyBtn = document.getElementById('clearApiKey');
+  if (clearApiKeyBtn) clearApiKeyBtn.addEventListener('click', () => {
+    Store.setApiKey('');
+    if (window.TMDB) TMDB.setKey('');
+    document.getElementById('apiKeyInput').value = '';
+    toast('TMDB API key cleared');
   });
 
   const saveOmdbBtn = document.getElementById('saveOmdbKey');
@@ -269,7 +284,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const k = document.getElementById('omdbKeyInput').value.trim();
     Store.setOmdbKey(k);
     if (window.OMDB) OMDB.setKey(k);
-    toast(k ? 'OMDb key saved!' : 'OMDb key cleared');
+    chrome.storage.local.set({ omdbKey: k }, () => toast(k ? 'OMDb key saved!' : 'OMDb key cleared'));
+  });
+
+  const clearOmdbBtn = document.getElementById('clearOmdbKey');
+  if (clearOmdbBtn) clearOmdbBtn.addEventListener('click', () => {
+    Store.setOmdbKey('');
+    if (window.OMDB) OMDB.setKey('');
+    document.getElementById('omdbKeyInput').value = '';
+    chrome.storage.local.remove(['omdbKey', 'omdbCache'], () => toast('OMDb key and cache cleared'));
   });
 
   document.getElementById('toggleKeyVis').addEventListener('click', () => {
@@ -283,9 +306,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     inp.type = inp.type === 'password' ? 'text' : 'password';
   });
 
+  const letterboxdWidgetToggle = document.getElementById('letterboxdWidgetToggle');
+  if (letterboxdWidgetToggle) letterboxdWidgetToggle.addEventListener('change', () => {
+    const enabled = letterboxdWidgetToggle.checked;
+    if (Store.setLetterboxdWidgetEnabled) Store.setLetterboxdWidgetEnabled(enabled);
+    else chrome.storage.local.set({ letterboxdWidgetEnabled: enabled });
+    toast(enabled ? 'Letterboxd dice button enabled' : 'Letterboxd dice button disabled');
+  });
+
   document.getElementById('toggleMalKeyVis').addEventListener('click', () => {
     const inp = document.getElementById('malClientId');
     inp.type = inp.type === 'password' ? 'text' : 'password';
+  });
+
+  const clearMalClientIdBtn = document.getElementById('clearMalClientId');
+  if (clearMalClientIdBtn) clearMalClientIdBtn.addEventListener('click', () => {
+    if (window.MalOAuth) {
+      MalOAuth._token = null;
+      MalOAuth.setClientId('');
+    }
+    const inp = document.getElementById('malClientId');
+    if (inp) inp.value = '';
+    chrome.storage.local.remove(['malOAuth'], () => toast('MAL Client ID and login cleared'));
   });
 
   document.getElementById('exportBtn').addEventListener('click', () => {

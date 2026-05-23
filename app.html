@@ -136,7 +136,10 @@
             <input type="password" id="apiKeyInput" placeholder="Paste your TMDB v3 API key">
             <button id="toggleKeyVis" class="icon-btn-sm">&#9673;</button>
           </div>
-          <button id="saveApiKey" class="btn-accent">Save Key</button>
+          <div class="settings-button-row">
+            <button id="saveApiKey" class="btn-accent">Save Key</button>
+            <button id="clearApiKey" class="btn-ghost btn-sync" type="button">Clear</button>
+          </div>
         </div>
 
         <div class="field">
@@ -146,7 +149,23 @@
             <input type="password" id="omdbKeyInput" placeholder="Paste your OMDb API key">
             <button id="toggleOmdbKeyVis" class="icon-btn-sm">&#9673;</button>
           </div>
-          <button id="saveOmdbKey" class="btn-accent">Save OMDb Key</button>
+          <div class="settings-button-row">
+            <button id="saveOmdbKey" class="btn-accent">Save OMDb Key</button>
+            <button id="clearOmdbKey" class="btn-ghost btn-sync" type="button">Clear</button>
+          </div>
+        </div>
+
+        <div class="field letterboxd-widget-settings">
+          <div class="settings-line-toggle">
+            <div>
+              <label for="letterboxdWidgetToggle">Letterboxd dice button</label>
+              <p class="field-hint">Show a small 🎲 button on letterboxd.com for surprise movie picks.</p>
+            </div>
+            <label class="mini-switch" aria-label="Enable Letterboxd dice button">
+              <input type="checkbox" id="letterboxdWidgetToggle">
+              <span aria-hidden="true"></span>
+            </label>
+          </div>
         </div>
         <hr>
 
@@ -311,6 +330,7 @@
                 <button id="malLoginBtn" class="btn-ghost btn-sync">Login with MAL</button>
                 <button id="malSyncBtn" class="btn-ghost btn-sync" disabled>Sync Now</button>
                 <button id="malLogoutBtn" class="btn-ghost btn-sync" style="display:none;">Logout</button>
+                <button id="clearMalClientId" class="btn-ghost btn-sync" type="button">Clear Client ID</button>
               </div>
               <div class="mal-user-info" id="malUserInfo" style="display:none;margin-top:8px;">
                 <span class="sync-progress-label" id="malUserLabel"></span>

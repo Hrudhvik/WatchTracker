@@ -18,6 +18,7 @@ WatchTracker is a local-first Chrome extension powered by TMDB, with optional OM
 - **Recommendations** from the full app and popup.
 - **Optional IMDb ratings** through OMDb.
 - **External links** to TMDB, IMDb, and Letterboxd for movies.
+- **Letterboxd Surprise Widget** on the Letterboxd home page for random movie suggestions by genre, language, decade, rating, and watched-status preference.
 
 ## Recommendations
 
@@ -68,6 +69,32 @@ Recommendations use vote confidence to avoid unreliable picks. The engine consid
 - Genre, language, type, and decade filters.
 - Recently shown recommendations, so repeated clicks do not simply reshuffle the same titles.
 
+## Letterboxd Surprise Widget
+
+WatchTracker can show a small Letterboxd-styled dice button on the Letterboxd home page:
+
+```txt
+https://letterboxd.com/
+```
+
+The widget is intentionally restricted to the Letterboxd home page only. It does not appear on `/films/`, `/lists/`, profile pages, film pages, or other Letterboxd subpages.
+
+Enable or disable it from **WatchTracker Settings → Letterboxd Surprise Widget**.
+
+When enabled, the dice button opens a compact randomizer panel with filters for:
+
+- Genre.
+- Language.
+- Minimum TMDB rating.
+- Year/decade, such as Any, 2020s, 2010s, 2000s, 1990s, and older decades.
+- Include already watched.
+
+Click **Surprise** to get a random movie suggestion with poster, year, language, TMDB rating, genres, and overview. Click **Go** to open that movie on Letterboxd.
+
+The widget uses temporary tab/session memory to reduce repeated suggestions while browsing. **Reset memory** clears the current filters, current result, watched toggle state, saved widget preferences for the session, and temporary suggestion memory.
+
+The randomizer uses TMDB discovery data and your saved WatchTracker library. By default, it avoids titles already in your WatchTracker movie list unless **Include already watched** is enabled.
+
 ## OMDb / IMDb Support
 
 OMDb support is optional. If you add an OMDb API key, WatchTracker can show IMDb ratings and IMDb vote counts.
@@ -104,6 +131,7 @@ https://letterboxd.com/tmdb/{tmdbId}/
 3. Request an API key.
 4. Copy your **API Key (v3 auth)**.
 5. Paste it into WatchTracker settings.
+6. Use the clear button in settings if you ever want to remove the saved TMDB key.
 
 TMDB is required for search, posters, metadata, and recommendations.
 
@@ -112,6 +140,7 @@ TMDB is required for search, posters, metadata, and recommendations.
 1. Go to [omdbapi.com](https://www.omdbapi.com/).
 2. Get an API key.
 3. Paste it into WatchTracker settings.
+4. Use the clear button in settings if you ever want to remove the saved OMDb key and OMDb cache.
 
 OMDb is optional and is only used for IMDb ratings/votes and extra IMDb data.
 
@@ -138,7 +167,7 @@ If you track anime on MyAnimeList, you can sync your library directly:
 
 WatchTracker stores your data locally using `chrome.storage.local`.
 
-Your library, diary, settings, API keys, and cached recommendation data stay in your browser. The extension only contacts external services when needed for features such as search, metadata, ratings, sync, or recommendations.
+Your library, diary, settings, API keys, Letterboxd widget preference, and cached recommendation data stay in your browser. The extension only contacts external services when needed for features such as search, metadata, ratings, sync, or recommendations.
 
 External services used:
 
@@ -146,7 +175,7 @@ External services used:
 - **OMDb** for optional IMDb rating/vote data.
 - **MyAnimeList** only if MAL sync is configured.
 
-Use **Export/Import** in settings to create or restore JSON backups.
+Use **Export/Import** in settings to create or restore JSON backups. Settings also include clear actions for saved TMDB keys, OMDb keys/cache, and MyAnimeList client/login data.
 
 ## Development Notes
 
@@ -162,6 +191,8 @@ Main files:
 - `ui-recommendations.js` — recommendations page UI.
 - `ui-detail.js` — movie/show detail UI.
 - `styles.css` — main app styles.
+- `letterboxd-widget.js` — Letterboxd home-page dice widget.
+- `letterboxd-widget.css` — Letterboxd widget styling.
 
 ## Notes
 
@@ -169,3 +200,4 @@ Main files:
 - Your personal rating is used separately when building taste-based recommendations.
 - Very narrow filters may produce fewer results, especially for TV shows or less common language/genre combinations.
 - Regional-language recommendations intentionally use more flexible vote logic than global recommendations.
+- The Letterboxd dice widget only appears on `https://letterboxd.com/` when enabled in settings.

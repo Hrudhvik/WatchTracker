@@ -3267,3 +3267,109 @@ kbd {
   .rec-card { grid-template-columns: 68px 1fr; }
   .rec-poster { width: 68px; height: 102px; }
 }
+
+/* Letterboxd widget settings toggle */
+.letterboxd-widget-settings {
+  margin-top: 14px;
+}
+.settings-line-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 58px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255,255,255,.025);
+}
+.settings-line-toggle label:not(.mini-switch) {
+  display: block;
+  margin: 0 0 4px;
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 800;
+}
+.settings-line-toggle .field-hint {
+  margin: 0;
+  line-height: 1.35;
+}
+.mini-switch {
+  position: relative;
+  display: inline-flex;
+  width: 46px;
+  height: 26px;
+  flex: 0 0 46px;
+  cursor: pointer;
+}
+.mini-switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.mini-switch span {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--bg-4);
+  border: 1px solid var(--border);
+  transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+.mini-switch span::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  transition: transform var(--transition);
+}
+.mini-switch input:checked + span {
+  background: linear-gradient(135deg, var(--accent), #00c030);
+  border-color: transparent;
+  box-shadow: 0 0 0 3px rgba(0,192,48,.14);
+}
+.mini-switch input:checked + span::after {
+  transform: translateX(20px);
+}
+@media (max-width: 520px) {
+  .settings-line-toggle { align-items: flex-start; }
+}
+
+/* Settings key controls */
+.settings-button-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.settings-button-row .btn-accent {
+  margin: 0;
+}
+.settings-button-row .btn-ghost {
+  min-height: 36px;
+}
+.letterboxd-widget-settings {
+  margin-top: 6px;
+  margin-bottom: 16px;
+}
+.settings-line-toggle {
+  align-items: center;
+  min-height: 54px;
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+.settings-line-toggle label:not(.mini-switch) {
+  font-size: 13px;
+  line-height: 1.2;
+}
+.settings-line-toggle .field-hint {
+  font-size: 11px;
+}
+.mini-switch {
+  margin-left: auto;
+}

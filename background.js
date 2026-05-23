@@ -32,9 +32,54 @@ chrome.alarms?.onAlarm?.addListener(async (alarm) => {
 });
 
 chrome.runtime.onInstalled?.addListener(async () => {
+  const existing = await chrome.storage.local.get(['letterboxdWidgetEnabled']);
+  if (typeof existing.letterboxdWidgetEnabled === 'undefined') {
+    await chrome.storage.local.set({ letterboxdWidgetEnabled: true });
+  }
+  chrome.tabs?.query?.({ url: ['https://letterboxd.com/'] }, tabs => {
+    for (const tab of tabs || []) injectLetterboxdWidget(tab.id, tab.url);
+  });
   const data = await chrome.storage.local.get(['syncConfig']);
   const config = data.syncConfig;
   if (config?.syncInterval > 0) {
     chrome.alarms.create('watchtracker-sync', { periodInMinutes: config.syncInterval });
   }
+});
+
+
+// ─── Letterboxd dice widget fallback injector ───
+// Content scripts normally inject the widget. This fallback makes the dice appear
+// even when the user enables/reloads the extension while Letterboxd is already open.
+async function injectLetterboxdWidget(tabId, url) {
+  try {
+    if (!url || !/^https:\/\/letterboxd\.com\/?(?:[?#].*)?$/i.test(url)) return;
+    const { letterboxdWidgetEnabled } = await chrome.storage.local.get(['letterboxdWidgetEnabled']);
+    if (letterboxdWidgetEnabled === false) return;
+    await chrome.scripting.insertCSS({ target: { tabId }, files: ['letterboxd-widget.css'] }).catch(() => {});
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['letterboxd-widget.js'] }).catch(() => {});
+  } catch (_) {}
+}
+
+chrome.tabs?.onUpdated?.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'loading' || changeInfo.status === 'complete') injectLetterboxdWidget(tabId, tab.url || changeInfo.url);
+});
+
+chrome.tabs?.onActivated?.addListener(async ({ tabId }) => {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    injectLetterboxdWidget(tabId, tab.url);
+  } catch (_) {}
+});
+
+chrome.runtime?.onStartup?.addListener(() => {
+  chrome.tabs?.query?.({ url: ['https://letterboxd.com/'] }, tabs => {
+    for (const tab of tabs || []) injectLetterboxdWidget(tab.id, tab.url);
+  });
+});
+
+chrome.storage?.onChanged?.addListener((changes, area) => {
+  if (area !== 'local' || !changes.letterboxdWidgetEnabled) return;
+  chrome.tabs?.query?.({ url: ['https://letterboxd.com/'] }, tabs => {
+    for (const tab of tabs || []) injectLetterboxdWidget(tab.id, tab.url);
+  });
 });

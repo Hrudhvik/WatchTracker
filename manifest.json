@@ -1,23 +1,25 @@
 {
   "manifest_version": 3,
   "name": "WatchTracker",
-  "version": "3.1.0",
+  "version": "3.3.2",
   "description": "Track movies and TV shows with TMDB data, season progress, themes, and a full-tab interface. Sync with Letterboxd & MAL.",
   "permissions": [
     "storage",
     "unlimitedStorage",
     "alarms",
-    "identity"
+    "identity",
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
-    "https://letterboxd.com/*",
-    "https://boxd.it/*",
+    "https://letterboxd.com/",
     "https://api.jikan.moe/*",
     "https://api.myanimelist.net/*",
-    "https://myanimelist.net/*",
     "https://api.themoviedb.org/*",
-    "https://www.omdbapi.com/*",
-    "https://raw.githubusercontent.com/*"
+    "https://boxd.it/*",
+    "https://myanimelist.net/*",
+    "https://raw.githubusercontent.com/*",
+    "https://www.omdbapi.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -34,5 +36,20 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://letterboxd.com/"
+      ],
+      "js": [
+        "letterboxd-widget.js"
+      ],
+      "css": [
+        "letterboxd-widget.css"
+      ],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ]
 }
