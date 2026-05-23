@@ -3,7 +3,7 @@
    ═══════════════════════════════════════════ */
 
 const Store = {
-  _data: { apiKey: '', movies: [], tvshows: [], diary: [], activity: [], theme: null, popupPrefs: null },
+  _data: { apiKey: '', omdbKey: '', movies: [], tvshows: [], diary: [], activity: [], theme: null, popupPrefs: null },
   _nextId: 1,
 
   _assignIds() {
@@ -18,8 +18,9 @@ const Store = {
 
   async load() {
     return new Promise(resolve => {
-      chrome.storage.local.get(['apiKey', 'movies', 'tvshows', 'diary', 'activity', 'theme', 'popupPrefs'], d => {
+      chrome.storage.local.get(['apiKey', 'omdbKey', 'movies', 'tvshows', 'diary', 'activity', 'theme', 'popupPrefs'], d => {
         this._data.apiKey = d.apiKey || '';
+        this._data.omdbKey = d.omdbKey || '';
         this._data.movies = d.movies || [];
         this._data.tvshows = d.tvshows || [];
         this._data.diary = d.diary || [];
@@ -37,6 +38,13 @@ const Store = {
   setApiKey(key) {
     this._data.apiKey = key;
     chrome.storage.local.set({ apiKey: key });
+  },
+
+  // OMDb Key
+  getOmdbKey() { return this._data.omdbKey || ''; },
+  setOmdbKey(key) {
+    this._data.omdbKey = key;
+    chrome.storage.local.set({ omdbKey: key });
   },
 
   // ─── Movies ───

@@ -3,7 +3,12 @@
   "name": "WatchTracker",
   "version": "3.1.0",
   "description": "Track movies and TV shows with TMDB data, season progress, themes, and a full-tab interface. Sync with Letterboxd & MAL.",
-  "permissions": ["storage", "unlimitedStorage", "alarms", "identity"],
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "alarms",
+    "identity"
+  ],
   "host_permissions": [
     "https://letterboxd.com/*",
     "https://boxd.it/*",
@@ -11,6 +16,7 @@
     "https://api.myanimelist.net/*",
     "https://myanimelist.net/*",
     "https://api.themoviedb.org/*",
+    "https://www.omdbapi.com/*",
     "https://raw.githubusercontent.com/*"
   ],
   "background": {

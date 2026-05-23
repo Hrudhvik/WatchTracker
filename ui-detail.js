@@ -294,8 +294,9 @@ const DetailUI = {
             <button id="detailManualSyncBtn" class="btn-ghost" style="font-size:12px; padding:2px 6px; margin-left:auto; height:auto; min-height:0;">&#128279; Link</button>
             ${stored && (stored._syncOriginalTitle || stored.syncSource) ? `<span id="detailSyncInfo" class="detail-sync-info-icon" title="${stored._syncOriginalTitle ? 'Imported as: ' + esc(stored._syncOriginalTitle) + (stored._syncOriginalYear ? ' (' + stored._syncOriginalYear + ')' : '') : ''}${stored.syncSource ? (stored._syncOriginalTitle ? ' via ' : 'Source: ') + esc(stored.syncSource) : ''}" style="font-size:14px;color:var(--text-2);cursor:help;">&#9432;</span>` : ''}
             <button id="detailMergeBtn" class="btn-ghost" style="font-size:12px; padding:2px 6px; height:auto; min-height:0;">Merge</button>
-            ${!isAnime ? `<a href="https://www.themoviedb.org/${isM?'movie':'tv'}/${Math.abs(tmdbId)}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; TMDB</a>` : ''}
-            ${imdbId ? `<a href="https://www.imdb.com/title/${imdbId}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; IMDb</a>` : ''}
+            ${!isAnime ? `<a href="https://www.themoviedb.org/${isM?'movie':'tv'}/${Math.abs(tmdbId)}" target="_blank" class="detail-ext-link">&#8599; TMDB</a>` : ''}
+            ${isM && !isAnime ? `<a href="https://letterboxd.com/tmdb/${Math.abs(tmdbId)}/" target="_blank" class="detail-ext-link">&#8599; Letterboxd</a>` : ''}
+            ${imdbId ? `<a href="https://www.imdb.com/title/${imdbId}" target="_blank" class="detail-ext-link">&#8599; IMDb</a>` : ''}
             ${stored && stored.malId ? `<a href="https://myanimelist.net/anime/${stored.malId}" target="_blank" style="color:var(--text-2); font-size:12px; text-decoration:none;">&#8599; MAL</a>` : ''}
           </div>
           ${stored && stored._id ? `<div style="font-size:10px;color:var(--text-3);opacity:0.5;margin-top:4px;">ID: ${stored._id}</div>` : ''}

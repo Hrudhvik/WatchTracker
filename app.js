@@ -80,6 +80,7 @@ const App = {
     if (name === 'watchlist') ListUI.render();
     else if (name === 'profile') ProfileUI.render();
     else if (name === 'diary') DiaryUI.render();
+    else if (name === 'recommendations') RecommendationsUI.render();
     else if (name === 'activity') ActivityUI.render();
   },
   refreshCounts() {
@@ -93,6 +94,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const key = Store.getApiKey();
   if (key) { TMDB.setKey(key); document.getElementById('apiKeyInput').value = key; }
+  const omdbKey = Store.getOmdbKey ? Store.getOmdbKey() : '';
+  if (omdbKey && window.OMDB) { OMDB.setKey(omdbKey); const oi = document.getElementById('omdbKeyInput'); if (oi) oi.value = omdbKey; }
 
   App.refreshCounts();
   ListUI.init();
@@ -261,8 +264,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('settingsModal').classList.add('hidden');
   });
 
+  const saveOmdbBtn = document.getElementById('saveOmdbKey');
+  if (saveOmdbBtn) saveOmdbBtn.addEventListener('click', () => {
+    const k = document.getElementById('omdbKeyInput').value.trim();
+    Store.setOmdbKey(k);
+    if (window.OMDB) OMDB.setKey(k);
+    toast(k ? 'OMDb key saved!' : 'OMDb key cleared');
+  });
+
   document.getElementById('toggleKeyVis').addEventListener('click', () => {
     const inp = document.getElementById('apiKeyInput');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  });
+
+  const toggleOmdbBtn = document.getElementById('toggleOmdbKeyVis');
+  if (toggleOmdbBtn) toggleOmdbBtn.addEventListener('click', () => {
+    const inp = document.getElementById('omdbKeyInput');
     inp.type = inp.type === 'password' ? 'text' : 'password';
   });
 
@@ -735,14 +752,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 const ThemeEngine = {
   presets: {
-    default:  { bg0:'#08090c', bg1:'#0e1015', bg2:'#151820', bg3:'#1c2030', bg4:'#242a3a', accent:'#6c5ce7', accentL:'#a29bfe', text0:'#f0f2f5', text1:'#c0c5d0', text2:'#7a8194', text3:'#4a5068', border:'rgba(255,255,255,0.06)' },
-    midnight: { bg0:'#0d1117', bg1:'#161b22', bg2:'#1c2129', bg3:'#21262d', bg4:'#30363d', accent:'#58a6ff', accentL:'#79c0ff', text0:'#e6edf3', text1:'#b1bac4', text2:'#6e7681', text3:'#484f58', border:'rgba(255,255,255,0.06)' },
-    ocean:    { bg0:'#0a192f', bg1:'#112240', bg2:'#162b50', bg3:'#1d3a6a', bg4:'#254980', accent:'#64ffda', accentL:'#88ffea', text0:'#e6f1ff', text1:'#a8c0d8', text2:'#607b96', text3:'#3d566e', border:'rgba(255,255,255,0.06)' },
-    forest:   { bg0:'#0b1a0b', bg1:'#132413', bg2:'#1a2e1a', bg3:'#223b22', bg4:'#2d4a2d', accent:'#4ade80', accentL:'#86efac', text0:'#ecfdf5', text1:'#a7cfb0', text2:'#5c8a6a', text3:'#3a5c42', border:'rgba(255,255,255,0.06)' },
-    sunset:   { bg0:'#1a0a0a', bg1:'#2d1515', bg2:'#3a1e1e', bg3:'#4a2828', bg4:'#5c3535', accent:'#f97316', accentL:'#fb923c', text0:'#fef2f2', text1:'#d4a0a0', text2:'#8a5555', text3:'#5c3535', border:'rgba(255,255,255,0.06)' },
-    sakura:   { bg0:'#1a0f18', bg1:'#2a1525', bg2:'#351c30', bg3:'#42243d', bg4:'#522e4d', accent:'#f472b6', accentL:'#f9a8d4', text0:'#fdf2f8', text1:'#d4a0c0', text2:'#8a5578', text3:'#5c3550', border:'rgba(255,255,255,0.06)' },
-    nord:     { bg0:'#2e3440', bg1:'#3b4252', bg2:'#434c5e', bg3:'#4c566a', bg4:'#5a6478', accent:'#88c0d0', accentL:'#8fbcbb', text0:'#eceff4', text1:'#d8dee9', text2:'#81a1c1', text3:'#5e81ac', border:'rgba(255,255,255,0.08)' },
-    light:    { bg0:'#f5f5f7', bg1:'#e8e8ed', bg2:'#dddde3', bg3:'#d0d0d8', bg4:'#c0c0cc', accent:'#6c5ce7', accentL:'#5a4bd4', text0:'#1a1a2e', text1:'#333355', text2:'#666688', text3:'#9999aa', border:'rgba(0,0,0,0.08)' },
+    default:  { bg0:'#08090c', bg1:'#0e1015', bg2:'#151820', bg3:'#1c2030', bg4:'#242a3a', accent:'#6c5ce7', accentL:'#a29bfe', text0:'#f5f7fb', text1:'#d2d7e2', text2:'#9aa3b7', text3:'#697189', border:'rgba(255,255,255,0.08)' },
+    midnight: { bg0:'#0d1117', bg1:'#161b22', bg2:'#1c2129', bg3:'#21262d', bg4:'#30363d', accent:'#58a6ff', accentL:'#79c0ff', text0:'#f0f6fc', text1:'#c9d1d9', text2:'#8b949e', text3:'#6e7681', border:'rgba(255,255,255,0.08)' },
+    ocean:    { bg0:'#0a192f', bg1:'#112240', bg2:'#162b50', bg3:'#1d3a6a', bg4:'#254980', accent:'#64ffda', accentL:'#88ffea', text0:'#eef7ff', text1:'#c6d9ed', text2:'#8fb0cf', text3:'#6385a4', border:'rgba(255,255,255,0.08)' },
+    forest:   { bg0:'#0b1a0b', bg1:'#132413', bg2:'#1a2e1a', bg3:'#223b22', bg4:'#2d4a2d', accent:'#4ade80', accentL:'#86efac', text0:'#f0fdf4', text1:'#c7e8cf', text2:'#8fc79c', text3:'#6a9b73', border:'rgba(255,255,255,0.08)' },
+    sunset:   { bg0:'#1a0a0a', bg1:'#2d1515', bg2:'#3a1e1e', bg3:'#4a2828', bg4:'#5c3535', accent:'#f97316', accentL:'#fb923c', text0:'#fff7ed', text1:'#ffd4b0', text2:'#d69a75', text3:'#a8755d', border:'rgba(255,255,255,0.08)' },
+    sakura:   { bg0:'#1a0f18', bg1:'#2a1525', bg2:'#351c30', bg3:'#42243d', bg4:'#522e4d', accent:'#f472b6', accentL:'#f9a8d4', text0:'#fff7fb', text1:'#f0c6da', text2:'#c78cab', text3:'#9a6984', border:'rgba(255,255,255,0.08)' },
+    nord:     { bg0:'#2e3440', bg1:'#3b4252', bg2:'#434c5e', bg3:'#4c566a', bg4:'#5a6478', accent:'#88c0d0', accentL:'#8fbcbb', text0:'#f4f6fb', text1:'#e5e9f0', text2:'#b8c4d4', text3:'#8fa2bb', border:'rgba(255,255,255,0.1)' },
+    light:    { bg0:'#f5f5f7', bg1:'#e8e8ed', bg2:'#dddde3', bg3:'#d0d0d8', bg4:'#c0c0cc', accent:'#6c5ce7', accentL:'#5a4bd4', text0:'#111827', text1:'#253047', text2:'#4b5875', text3:'#6b7280', border:'rgba(0,0,0,0.12)' },
   },
 
   init() {

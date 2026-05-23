@@ -33,6 +33,9 @@
       <button class="nav-item" data-view="diary">
         <span class="nav-icon">&#9744;</span> Diary
       </button>
+      <button class="nav-item" data-view="recommendations">
+        <span class="nav-icon">&#9733;</span> Recommendations
+      </button>
       <button class="nav-item" data-view="profile">
         <span class="nav-icon">&#9673;</span> Profile
       </button>
@@ -57,6 +60,7 @@
 
     <section id="page-profile" class="page"></section>
     <section id="page-diary" class="page"></section>
+    <section id="page-recommendations" class="page"></section>
     <section id="page-activity" class="page"></section>
 
     <section id="page-watchlist" class="page active-page">
@@ -133,6 +137,16 @@
             <button id="toggleKeyVis" class="icon-btn-sm">&#9673;</button>
           </div>
           <button id="saveApiKey" class="btn-accent">Save Key</button>
+        </div>
+
+        <div class="field">
+          <label>OMDb API Key <span class="field-hint-inline">optional, for IMDb ratings</span></label>
+          <p class="field-hint">Used only as an extra IMDb rating/vote source. TMDB remains the main discovery source.</p>
+          <div class="input-row">
+            <input type="password" id="omdbKeyInput" placeholder="Paste your OMDb API key">
+            <button id="toggleOmdbKeyVis" class="icon-btn-sm">&#9673;</button>
+          </div>
+          <button id="saveOmdbKey" class="btn-accent">Save OMDb Key</button>
         </div>
         <hr>
 
@@ -347,6 +361,7 @@
   <div id="toastContainer"></div>
 
   <script src="tmdb.js"></script>
+  <script src="omdb.js"></script>
   <script src="store.js"></script>
   <script src="sync.js"></script>
   <script src="ui-list.js"></script>
@@ -354,6 +369,8 @@
   <script src="ui-diary.js"></script>
   <script src="ui-profile.js"></script>
   <script src="ui-activity.js"></script>
+  <script src="recommendations.js"></script>
+  <script src="ui-recommendations.js"></script>
   <script src="app.js"></script>
 </body>
 

@@ -11,12 +11,16 @@ const STATUS_CFG = {
 
 let pFilter = 'watching', pType = 'all', pSort = 'dateUpdated', pView = 'list', pQuery = '';
 let pMode = 'list';
+let pReturnMode = 'list';
 let pSearchTimeout = null;
+let pRecCache = { html: '', summary: '', filters: null, results: [] };
 
 document.addEventListener('DOMContentLoaded', async () => {
   await Store.load();
   const apiKey = Store.getApiKey();
   if (apiKey) TMDB.setKey(apiKey);
+  const omdbKey = Store.getOmdbKey ? Store.getOmdbKey() : '';
+  if (omdbKey && window.OMDB) OMDB.setKey(omdbKey);
   applyPopupTheme();
   restorePrefs();
   renderList();
@@ -31,9 +35,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Diary view
   document.getElementById('pDiaryBtn').addEventListener('click', () => enterDiaryMode());
+  document.getElementById('pRecBtn').addEventListener('click', () => enterRecommendationsMode());
 
-  // Back — returns to list from any sub-view
-  document.getElementById('pBack').addEventListener('click', goBackToList);
+  // Back — returns to the previous popup view when possible
+  document.getElementById('pBack').addEventListener('click', () => {
+    if (pMode === 'detail' && pReturnMode === 'recommendations') enterRecommendationsMode(false);
+    else goBackToList();
+  });
 
   // + Add New button — enters TMDB search mode
   document.getElementById('pAddNew').addEventListener('click', () => {
@@ -217,12 +225,14 @@ function closeSortDD() {
 
 function goBackToList() {
   pMode = 'list';
+  pReturnMode = 'list';
   document.getElementById('pBack').classList.add('hidden');
   document.getElementById('pControls').classList.remove('hidden');
   document.getElementById('pTmdbBar').classList.add('hidden');
   document.getElementById('pSearch').parentElement.classList.remove('hidden');
   document.getElementById('pAddNew').classList.remove('hidden');
   document.getElementById('pDiaryBtn').classList.remove('hidden');
+  document.getElementById('pRecBtn').classList.remove('hidden');
   document.getElementById('pTmdbSearch').value = '';
   document.getElementById('pSearch').value = '';
   pQuery = '';
@@ -238,6 +248,7 @@ function enterDiaryMode() {
   document.getElementById('pSearch').parentElement.classList.add('hidden');
   document.getElementById('pAddNew').classList.add('hidden');
   document.getElementById('pDiaryBtn').classList.add('hidden');
+  document.getElementById('pRecBtn').classList.add('hidden');
   document.getElementById('pEmpty').classList.add('hidden');
   renderPopupDiary();
 }
@@ -328,10 +339,177 @@ function enterTMDBMode() {
   document.getElementById('pTmdbBar').classList.remove('hidden');
   document.getElementById('pSearch').parentElement.classList.add('hidden');
   document.getElementById('pAddNew').classList.add('hidden');
+  document.getElementById('pRecBtn').classList.add('hidden');
   document.getElementById('pEmpty').classList.add('hidden');
   const el = document.getElementById('pList');
   el.innerHTML = '<div class="p-search-msg">Type to search TMDB for movies and TV shows</div>';
   setTimeout(() => document.getElementById('pTmdbSearch').focus(), 50);
+}
+
+
+function enterRecommendationsMode(reset = false) {
+  pMode = 'recommendations';
+  pReturnMode = 'list';
+  document.getElementById('pBack').classList.remove('hidden');
+  document.getElementById('pControls').classList.add('hidden');
+  document.getElementById('pTmdbBar').classList.add('hidden');
+  document.getElementById('pSearch').parentElement.classList.add('hidden');
+  document.getElementById('pAddNew').classList.add('hidden');
+  document.getElementById('pDiaryBtn').classList.add('hidden');
+  document.getElementById('pRecBtn').classList.add('hidden');
+  document.getElementById('pEmpty').classList.add('hidden');
+  const el = document.getElementById('pList');
+  if (!reset && pRecCache.html) {
+    el.innerHTML = pRecCache.html;
+    bindPopupRecommendationEvents();
+    return;
+  }
+  el.innerHTML = popupRecommendationShell();
+  bindPopupRecommendationEvents();
+}
+
+function popupRecommendationShell() {
+  const languageOptions = POPUP_REC_LANGUAGES.map(([code, name]) => `<option value="${esc(name)} (${esc(code)})"></option>`).join('');
+  return `<div class="pr-wrap">
+    <div class="pr-head">
+      <div><div class="pr-title">Recommendations</div><div class="pr-sub">Quick picks from your tracker or TMDB.</div></div>
+    </div>
+    <div class="pr-panel">
+      <div class="pr-row"><label>Source</label><select id="prSource"><option value="new">Something new</option><option value="plan_to_watch">From Plan to Watch</option><option value="completed">From Completed</option><option value="library">From My Library</option></select></div>
+      <div class="pr-grid2">
+        <div class="pr-row"><label>Picks</label><select id="prCount"><option>1</option><option selected>3</option><option>5</option><option>10</option></select></div>
+        <div class="pr-row"><label>Type</label><select id="prType"><option value="movie" selected>Movies</option><option value="tv">TV Shows</option><option value="both">Movies + TV</option></select></div>
+      </div>
+      <div class="pr-grid2">
+        <div class="pr-row"><label>Style</label><select id="prStyle"><option value="best" selected>Closest match</option><option value="because">Similar favorites</option><option value="hidden">Hidden gems</option><option value="popular">Popular</option><option value="wild">Surprise me</option><option value="random">Random by filters</option></select></div>
+        <div class="pr-row"><label>Genre</label><select id="prGenre">${popupGenreOptions()}</select></div>
+      </div>
+      <div class="pr-grid2">
+        <div class="pr-row"><label>TMDB rating</label><select id="prTmdbRating"><option value="">Any</option><option value="6">6+</option><option value="7">7+</option><option value="8">8+</option><option value="9">9+</option></select></div>
+        <div class="pr-row"><label>Library</label><select id="prLibrary"><option value="new_only">New only</option><option value="not_completed">Not completed</option><option value="include_library">Allow saved</option></select></div>
+      </div>
+      <div class="pr-row"><label>Language</label><input id="prLanguage" list="prLanguageList" type="search" placeholder="Any language, e.g. Telugu, Tamil"><datalist id="prLanguageList">${languageOptions}</datalist></div>
+      <button id="prSuggest" class="pr-primary">Suggest</button>
+    </div>
+    <div id="prSummary" class="pr-summary"></div>
+    <div id="prResults" class="pr-empty">Choose filters and tap Suggest.</div>
+  </div>`;
+}
+
+function bindPopupRecommendationEvents() {
+  const root = document.getElementById('pList');
+  const btn = root.querySelector('#prSuggest');
+  if (btn) btn.addEventListener('click', popupSuggestRecommendations);
+  root.querySelectorAll('[data-pr-card]').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      showDetail(Number(card.dataset.id), card.dataset.type, 'recommendations');
+    });
+  });
+  root.querySelectorAll('[data-pr-add]').forEach(btn => {
+    btn.addEventListener('click', async (e) => { e.stopPropagation(); await popupAddRecommendation(btn); });
+  });
+}
+
+async function popupSuggestRecommendations() {
+  if (!TMDB.getKey() && document.getElementById('prSource').value === 'new') {
+    document.getElementById('prResults').innerHTML = '<div class="pr-empty">Set your TMDB API key in Settings first.</div>';
+    return;
+  }
+  const btn = document.getElementById('prSuggest');
+  const results = document.getElementById('prResults');
+  const summary = document.getElementById('prSummary');
+  btn.disabled = true; btn.textContent = 'Finding...';
+  results.className = 'pr-empty';
+  results.innerHTML = 'Finding picks...';
+  try {
+    const filters = {
+      source: document.getElementById('prSource').value,
+      count: Number(document.getElementById('prCount').value),
+      type: document.getElementById('prType').value,
+      style: document.getElementById('prStyle')?.value || 'best',
+      libraryMode: document.getElementById('prLibrary').value,
+      genre: document.getElementById('prGenre')?.value || '',
+      language: popupLanguageCode(document.getElementById('prLanguage').value),
+      minTmdbRating: document.getElementById('prTmdbRating').value,
+      minMyRating: '',
+      decade: '',
+    };
+    const data = await Recommendations.suggest(filters);
+    const items = data.results || [];
+    summary.textContent = items.length ? `${items.length} pick${items.length === 1 ? '' : 's'}${filters.style === 'random' ? ' · random by filters' : ''}${filters.genre ? ' · ' + filters.genre : ''}${filters.language ? ' · ' + popupLanguageName(filters.language) : ''}` : '';
+    results.className = items.length ? 'pr-results' : 'pr-empty';
+    results.innerHTML = items.length ? items.map((m, i) => popupRecommendationCard(m, i)).join('') : 'No matches found. Try Random by filters, Any rating, or clear Genre/Language.';
+    pRecCache = { html: document.getElementById('pList').innerHTML, summary: summary.textContent, filters, results: items };
+    bindPopupRecommendationEvents();
+  } catch (err) {
+    results.className = 'pr-empty';
+    results.innerHTML = `Could not load recommendations: ${esc(err.message || String(err))}`;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Suggest';
+  }
+}
+
+function popupRecommendationCard(m, i) {
+  const poster = TMDB.poster(m.posterPath, 'w92');
+  const inList = m.mediaType === 'movie' ? Store.hasMovie(m.tmdbId) : Store.hasTvShow(m.tmdbId);
+  const status = m.watchStatus ? String(m.watchStatus).replace(/_/g, ' ') : '';
+  const language = m.originalLanguage ? popupLanguageName(m.originalLanguage) : '';
+  const imdb = m.imdbRating ? `IMDb ${Number(m.imdbRating).toFixed(1)}` : '';
+  const meta = [m.mediaType === 'movie' ? 'Movie' : 'TV', m.year || '', m.voteAverage ? `TMDB ${Number(m.voteAverage).toFixed(1)}` : '', imdb, language].filter(Boolean).join(' · ');
+  const desc = String(m.overview || '').replace(/\s+/g, ' ').trim().slice(0, 130);
+  const action = inList ? `<span class="pr-saved">${esc(status || 'Saved')}</span>` : `<button class="pr-add" data-pr-add data-id="${m.tmdbId}" data-type="${m.mediaType}">Add</button>`;
+  return `<article class="pr-card" data-pr-card data-id="${m.tmdbId}" data-type="${m.mediaType}">
+    <div class="pr-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">${m.mediaType === 'movie' ? 'MOV' : 'TV'}</div>`}</div>
+    <div class="pr-info"><div class="pr-kicker">#${i + 1}</div><div class="pr-name">${esc(m.title)}</div><div class="pr-meta">${esc(meta)}</div>${desc ? `<div class="pr-desc">${esc(desc)}</div>` : ''}<div class="pr-actions">${action}</div></div>
+  </article>`;
+}
+
+async function popupAddRecommendation(btn) {
+  const id = Number(btn.dataset.id);
+  const type = btn.dataset.type;
+  btn.disabled = true; btn.textContent = 'Adding...';
+  try {
+    const rec = (pRecCache?.results || []).find(x => Number(x.tmdbId) === id && x.mediaType === type) || {};
+    if (type === 'movie') {
+      const d = await TMDB.movieDetails(id);
+      Store.addMovie({ tmdbId: d.id, title: d.title, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.release_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, imdbRating: rec?.imdbRating || 0, imdbVotes: rec?.imdbVotes || 0, imdbId: rec?.imdbId || d.imdb_id || '', runtime: d.runtime || 0, genres: (d.genres || []).map(g => g.name), originalLanguage: d.original_language || '', watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
+      Store.addActivity({ tmdbId: d.id, title: d.title, type: 'movie', posterPath: d.poster_path, action: 'added', detail: 'Added from popup recommendations', timestamp: new Date().toISOString() });
+    } else {
+      const d = await TMDB.tvDetails(id);
+      const ss = (d.seasons || []).filter(s => s.season_number > 0);
+      Store.addTvShow({ tmdbId: d.id, title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.first_air_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, imdbRating: rec?.imdbRating || 0, imdbVotes: rec?.imdbVotes || 0, imdbId: rec?.imdbId || d.external_ids?.imdb_id || '', totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: (d.genres || []).map(g => g.name), originalLanguage: d.original_language || '', watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', seasons: ss.map(s => ({ seasonNumber: s.season_number, episodeCount: s.episode_count || 0, episodesWatched: 0, posterPath: s.poster_path })), dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
+      Store.addActivity({ tmdbId: d.id, title: d.name, type: 'tv', posterPath: d.poster_path, action: 'added', detail: 'Added from popup recommendations', timestamp: new Date().toISOString() });
+    }
+    btn.outerHTML = '<span class="pr-saved">Saved</span>';
+    pRecCache.html = document.getElementById('pList').innerHTML;
+  } catch (err) {
+    btn.disabled = false; btn.textContent = 'Add';
+  }
+}
+
+function popupGenreOptions() {
+  const local = new Set();
+  try { Store.getAll().forEach(i => (i.genres || []).forEach(g => local.add(g))); } catch (_) {}
+  const fallback = ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Music', 'Mystery', 'Romance', 'Science Fiction', 'Thriller', 'War', 'Western'];
+  const genres = [...new Set([...local, ...fallback])].filter(Boolean).sort((a,b) => a.localeCompare(b));
+  return `<option value="">Any genre</option>${genres.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('')}`;
+}
+
+const POPUP_REC_LANGUAGES = [
+  ['en','English'], ['hi','Hindi'], ['te','Telugu'], ['ta','Tamil'], ['ml','Malayalam'], ['kn','Kannada'], ['bn','Bengali'], ['mr','Marathi'], ['pa','Punjabi'], ['gu','Gujarati'], ['ur','Urdu'], ['or','Odia'], ['as','Assamese'], ['ne','Nepali'], ['si','Sinhala'],
+  ['ja','Japanese'], ['ko','Korean'], ['zh','Mandarin / Chinese'], ['cn','Cantonese'], ['th','Thai'], ['id','Indonesian'], ['ms','Malay'], ['tl','Filipino / Tagalog'], ['vi','Vietnamese'], ['fr','French'], ['es','Spanish'], ['it','Italian'], ['de','German'], ['pt','Portuguese'], ['ru','Russian'], ['tr','Turkish'], ['ar','Arabic'], ['fa','Persian']
+];
+function popupLanguageCode(value = '') {
+  const v = String(value || '').trim(); if (!v) return '';
+  const paren = v.match(/\(([a-z]{2})\)$/i); if (paren) return paren[1].toLowerCase();
+  const found = POPUP_REC_LANGUAGES.find(([c,n]) => c.toLowerCase() === v.toLowerCase() || n.toLowerCase() === v.toLowerCase());
+  if (found) return found[0];
+  return Recommendations.normalizeLanguage ? Recommendations.normalizeLanguage(v) : v.toLowerCase();
+}
+function popupLanguageName(code = '') {
+  const found = POPUP_REC_LANGUAGES.find(([c]) => c === code);
+  return found ? found[1] : String(code || '').toUpperCase();
 }
 
 /* ═══════════════════════════════════════════
@@ -483,12 +661,16 @@ function bindDetailStatusDD(idPrefix, tmdbId, mediaType, title, posterPath) {
   });
 }
 
-async function showDetail(tmdbId, mediaType) {
+async function showDetail(tmdbId, mediaType, returnMode = 'list') {
   pMode = 'detail';
+  pReturnMode = returnMode || 'list';
   document.getElementById('pBack').classList.remove('hidden');
   document.getElementById('pControls').classList.add('hidden');
   document.getElementById('pTmdbBar').classList.add('hidden');
   document.getElementById('pAddNew').classList.add('hidden');
+  document.getElementById('pSearch').parentElement.classList.add('hidden');
+  document.getElementById('pDiaryBtn').classList.add('hidden');
+  document.getElementById('pRecBtn').classList.add('hidden');
   document.getElementById('pEmpty').classList.add('hidden');
 
   const isM = mediaType === 'movie';
@@ -510,7 +692,7 @@ async function showDetail(tmdbId, mediaType) {
     }
   }
 
-  if (!stored) { showTMDBDetail(tmdbId, mediaType); return; }
+  if (!stored) { showTMDBDetail(tmdbId, mediaType, pReturnMode); return; }
 
   el.innerHTML = '<div class="p-search-msg">Loading...</div>';
 
@@ -679,6 +861,7 @@ async function showDetail(tmdbId, mediaType) {
         </div>
         <div class="pd-links">
           ${!isAnime ? `<a href="https://www.themoviedb.org/${isM ? 'movie' : 'tv'}/${Math.abs(tmdbId)}" target="_blank">&#8599; TMDB</a>` : ''}
+          ${isM && tmdbId > 0 ? `<a href="https://letterboxd.com/tmdb/${Math.abs(tmdbId)}/" target="_blank">&#8599; Letterboxd</a>` : ''}
           ${imdbId ? `<a href="https://www.imdb.com/title/${imdbId}" target="_blank">&#8599; IMDb</a>` : ''}
           ${stored.malId ? `<a href="https://myanimelist.net/anime/${stored.malId}" target="_blank">&#8599; MAL</a>` : ''}
         </div>
@@ -866,12 +1049,12 @@ async function searchTMDB(query) {
           try {
             if (type === 'movie') {
               const d = await TMDB.movieDetails(id);
-              Store.addMovie({ tmdbId: d.id, title: d.title, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.release_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, runtime: d.runtime || 0, genres: (d.genres || []).map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
+              Store.addMovie({ tmdbId: d.id, title: d.title, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.release_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, imdbRating: rec?.imdbRating || 0, imdbVotes: rec?.imdbVotes || 0, imdbId: rec?.imdbId || d.imdb_id || '', runtime: d.runtime || 0, genres: (d.genres || []).map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
               Store.addActivity({ tmdbId: d.id, title: d.title, type: 'movie', posterPath: d.poster_path, action: 'added', detail: 'Added from popup', timestamp: new Date().toISOString() });
             } else {
               const d = await TMDB.tvDetails(id);
               const ss = (d.seasons || []).filter(s => s.season_number > 0);
-              Store.addTvShow({ tmdbId: d.id, title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.first_air_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: (d.genres || []).map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', seasons: ss.map(s => ({ seasonNumber: s.season_number, episodeCount: s.episode_count || 0, episodesWatched: 0, posterPath: s.poster_path })), dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
+              Store.addTvShow({ tmdbId: d.id, title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.first_air_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, imdbRating: rec?.imdbRating || 0, imdbVotes: rec?.imdbVotes || 0, imdbId: rec?.imdbId || d.external_ids?.imdb_id || '', totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: (d.genres || []).map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', seasons: ss.map(s => ({ seasonNumber: s.season_number, episodeCount: s.episode_count || 0, episodesWatched: 0, posterPath: s.poster_path })), dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
               Store.addActivity({ tmdbId: d.id, title: d.name, type: 'tv', posterPath: d.poster_path, action: 'added', detail: 'Added from popup', timestamp: new Date().toISOString() });
             }
             addBtn.textContent = 'Added'; addBtn.classList.add('added');
@@ -888,12 +1071,16 @@ async function searchTMDB(query) {
   }
 }
 
-async function showTMDBDetail(tmdbId, mediaType) {
+async function showTMDBDetail(tmdbId, mediaType, returnMode = 'list') {
   pMode = 'detail';
+  pReturnMode = returnMode || 'list';
   document.getElementById('pBack').classList.remove('hidden');
   document.getElementById('pControls').classList.add('hidden');
   document.getElementById('pTmdbBar').classList.add('hidden');
   document.getElementById('pAddNew').classList.add('hidden');
+  document.getElementById('pSearch').parentElement.classList.add('hidden');
+  document.getElementById('pDiaryBtn').classList.add('hidden');
+  document.getElementById('pRecBtn').classList.add('hidden');
   const el = document.getElementById('pList');
   el.innerHTML = '<div class="p-search-msg">Loading...</div>';
 
@@ -939,6 +1126,7 @@ async function showTMDBDetail(tmdbId, mediaType) {
       </div>
       <div class="pd-links">
         <a href="https://www.themoviedb.org/${isM ? 'movie' : 'tv'}/${d.id}" target="_blank">&#8599; TMDB</a>
+        ${isM ? `<a href="https://letterboxd.com/tmdb/${d.id}/" target="_blank">&#8599; Letterboxd</a>` : ''}
         ${imdbId ? `<a href="https://www.imdb.com/title/${imdbId}" target="_blank">&#8599; IMDb</a>` : ''}
       </div>
     </div>`;
@@ -950,7 +1138,7 @@ async function showTMDBDetail(tmdbId, mediaType) {
           if (isM) Store.addMovie({ tmdbId: d.id, title: d.title, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt(year) || 0, voteAverage: d.vote_average || 0, runtime: d.runtime || 0, genres: genres.map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
           else { const ss = (d.seasons || []).filter(s => s.season_number > 0); Store.addTvShow({ tmdbId: d.id, title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt(year) || 0, voteAverage: d.vote_average || 0, totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: genres.map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', seasons: ss.map(s => ({ seasonNumber: s.season_number, episodeCount: s.episode_count || 0, episodesWatched: 0, posterPath: s.poster_path })), dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() }); }
           Store.addActivity({ tmdbId: d.id, title, type: mediaType, posterPath: d.poster_path, action: 'added', detail: 'Added from popup', timestamp: new Date().toISOString() });
-          showDetail(d.id, mediaType);
+          showDetail(d.id, mediaType, pReturnMode);
         } catch (err) { btn.textContent = 'Error'; }
       });
     } else {

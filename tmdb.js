@@ -42,6 +42,40 @@ const TMDB = {
     return this._fetch(`/tv/${tvId}/season/${seasonNum}`);
   },
 
+  async discoverMovies(params = {}) {
+    return this._fetch('/discover/movie', {
+      include_adult: false,
+      include_video: false,
+      sort_by: 'vote_average.desc',
+      ...params,
+    });
+  },
+
+  async discoverTv(params = {}) {
+    return this._fetch('/discover/tv', {
+      include_adult: false,
+      include_null_first_air_dates: false,
+      sort_by: 'vote_average.desc',
+      ...params,
+    });
+  },
+
+  async movieRecommendations(id, page = 1) {
+    return this._fetch(`/movie/${id}/recommendations`, { page });
+  },
+
+  async movieSimilar(id, page = 1) {
+    return this._fetch(`/movie/${id}/similar`, { page });
+  },
+
+  async tvRecommendations(id, page = 1) {
+    return this._fetch(`/tv/${id}/recommendations`, { page });
+  },
+
+  async tvSimilar(id, page = 1) {
+    return this._fetch(`/tv/${id}/similar`, { page });
+  },
+
   // Image helpers
   poster(path, size = 'w342') {
     if (!path) return null;
