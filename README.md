@@ -1,6 +1,6 @@
 # WatchTracker — Browser Extension
 
-Track movies and TV shows, manage your watchlist, log diary entries, and get recommendations based on your own library.
+Track movies and TV shows, manage your watchlist, log diary entries, open custom quick links from detail pages, and get recommendations based on your own library.
 
 WatchTracker is a local-first Chrome extension powered by TMDB, with optional OMDb/IMDb ratings support.
 
@@ -18,7 +18,102 @@ WatchTracker is a local-first Chrome extension powered by TMDB, with optional OM
 - **Recommendations** from the full app and popup.
 - **Optional IMDb ratings** through OMDb.
 - **External links** to TMDB, IMDb, and Letterboxd for movies.
+- **Custom Quick Links** for opening a movie or TV show search on streaming/search sites.
+- **Default Quick Links** for Netflix, Prime Video, Hulu, and YouTube.
+- **Quick Link management** with show/hide selection, custom links, and reorder/arrange mode.
 - **Letterboxd Surprise Widget** on the Letterboxd home page for random movie suggestions by genre, language, decade, rating, and watched-status preference.
+
+## Quick Links
+
+WatchTracker includes Quick Links that appear on movie and TV detail pages in both the full app and the extension popup.
+
+Quick Links let you open the current title on external search pages such as Netflix, Prime Video, Hulu, YouTube, or any custom site you add.
+
+### Default Quick Links
+
+The built-in default Quick Links are:
+
+- Netflix
+- Prime Video
+- Hulu
+- YouTube
+
+Other default streaming links are intentionally disabled/commented out in code so only these defaults appear by default.
+
+### Show or Hide Quick Links
+
+Open **Settings → Quick Links**.
+
+Click a Quick Link card/title to select or unselect it:
+
+- Selected links are highlighted and appear on detail pages.
+- Unselected links are hidden from detail pages and from arrange mode.
+
+This applies to both default links and custom links.
+
+### Add a Custom Quick Link
+
+Custom Quick Links use two fields:
+
+- **Name** — the display name shown in WatchTracker.
+- **Search link** — the URL pattern used when opening the current movie or TV show.
+
+Example:
+
+```txt
+https://xyz.com/search?q={searchtermPlus}/?adult
+```
+
+If the current title is `Good Day`, WatchTracker replaces `{searchtermPlus}` with:
+
+```txt
+good+day
+```
+
+So the opened URL becomes:
+
+```txt
+https://xyz.com/search?q=good+day/?adult
+```
+
+### Search Term Placeholders
+
+Use these placeholders in custom Quick Link URLs:
+
+```txt
+{searchterm}           → no%20game%20no%20life
+{searchtermPlus}       → no+game+no+life
+{searchtermMinus}      → no-game-no-life
+{searchtermUnderscore} → no_game_no_life
+{searchtermRaw}        → no game no life
+```
+
+Recommended placeholder for most search URLs:
+
+```txt
+{searchtermPlus}
+```
+
+### Edit or Remove Custom Quick Links
+
+Default Quick Links cannot be edited or removed.
+
+Custom Quick Links can be:
+
+- Edited with the edit button.
+- Removed with the remove button.
+- Selected/unselected by clicking the card/title.
+
+### Arrange Quick Links
+
+Click **Arrange** in **Settings → Quick Links** to reorder selected Quick Links.
+
+Arrange mode shows only selected/enabled links. You can reorder links using:
+
+- Drag-and-drop.
+- Up/down buttons.
+
+The order you choose controls the order shown on detail pages and in the popup.
 
 ## Recommendations
 
@@ -115,12 +210,22 @@ Detail pages can include:
 - TMDB link.
 - IMDb link when an IMDb ID is available.
 - Letterboxd link for movies using the TMDB redirect format.
+- Quick Links for enabled default and custom search links.
 
 Letterboxd movie links use:
 
 ```txt
 https://letterboxd.com/tmdb/{tmdbId}/
 ```
+
+## Settings
+
+Settings are grouped into collapsible sections, including:
+
+- **API Keys** — TMDB, OMDb, and MyAnimeList settings.
+- **Quick Links** — default links, custom links, selection, editing, and arrange mode.
+- **Letterboxd Surprise Widget** — enable or disable the Letterboxd home-page dice widget.
+- **Export/Import** — backup and restore data.
 
 ## Setup
 
@@ -167,13 +272,14 @@ If you track anime on MyAnimeList, you can sync your library directly:
 
 WatchTracker stores your data locally using `chrome.storage.local`.
 
-Your library, diary, settings, API keys, Letterboxd widget preference, and cached recommendation data stay in your browser. The extension only contacts external services when needed for features such as search, metadata, ratings, sync, or recommendations.
+Your library, diary, settings, API keys, Quick Links, Letterboxd widget preference, and cached recommendation data stay in your browser. The extension only contacts external services when needed for features such as search, metadata, ratings, sync, recommendations, or opening external Quick Links.
 
 External services used:
 
 - **TMDB** for search, posters, metadata, genres, languages, and discovery.
 - **OMDb** for optional IMDb rating/vote data.
 - **MyAnimeList** only if MAL sync is configured.
+- **Enabled Quick Link sites** only when you click those links.
 
 Use **Export/Import** in settings to create or restore JSON backups. Settings also include clear actions for saved TMDB keys, OMDb keys/cache, and MyAnimeList client/login data.
 
@@ -181,16 +287,16 @@ Use **Export/Import** in settings to create or restore JSON backups. Settings al
 
 Main files:
 
-- `app.html` — main app shell.
-- `app.js` — app navigation and page lifecycle.
-- `popup.html`, `popup.js`, `popup.css` — popup UI.
-- `store.js` — local storage/data helpers.
+- `app.html` — main app shell and settings UI.
+- `app.js` — app navigation, settings handlers, and Quick Link management UI.
+- `popup.html`, `popup.js`, `popup.css` — popup UI and popup detail Quick Links.
+- `store.js` — local storage/data helpers, including Quick Link defaults and persistence.
 - `tmdb.js` — TMDB API helpers.
 - `omdb.js` — optional OMDb API helpers.
 - `recommendations.js` — recommendation engine.
 - `ui-recommendations.js` — recommendations page UI.
-- `ui-detail.js` — movie/show detail UI.
-- `styles.css` — main app styles.
+- `ui-detail.js` — movie/show detail UI and detail-page Quick Links.
+- `styles.css` — main app styles, including Quick Link settings and arrange mode.
 - `letterboxd-widget.js` — Letterboxd home-page dice widget.
 - `letterboxd-widget.css` — Letterboxd widget styling.
 
@@ -201,3 +307,4 @@ Main files:
 - Very narrow filters may produce fewer results, especially for TV shows or less common language/genre combinations.
 - Regional-language recommendations intentionally use more flexible vote logic than global recommendations.
 - The Letterboxd dice widget only appears on `https://letterboxd.com/` when enabled in settings.
+- Quick Link search behavior depends on each external site's current search URL format and login/session requirements.

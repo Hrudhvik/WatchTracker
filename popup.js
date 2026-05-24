@@ -606,6 +606,44 @@ function renderList() {
    DETAIL VIEW — custom status dropdown + eps + remove
    ═══════════════════════════════════════════ */
 
+
+function buildQuickLinkUrl(template, title) {
+  if (!template) return '';
+  const raw = (title || '').trim();
+  const collapsed = raw.replace(/\s+/g, ' ');
+  const map = {
+    searchterm: encodeURIComponent(collapsed),
+    searchtermPlus: collapsed.split(' ').map(encodeURIComponent).join('+'),
+    searchtermMinus: collapsed.toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, ''),
+    searchtermUnderscore: collapsed.toLowerCase().replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, ''),
+    searchtermRaw: collapsed,
+  };
+  return template.replace(/\{(searchtermPlus|searchtermMinus|searchtermUnderscore|searchtermRaw|searchterm)\}/g, (_, key) => map[key]);
+}
+
+function renderPopupQuickLinks(title) {
+  const links = Store.getQuickLinks ? Store.getQuickLinks().filter(l => l.enabled !== false) : [];
+  const row = links.map(l => {
+    const template = l.url || l.animeUrl || l.mangaUrl || '';
+    const href = buildQuickLinkUrl(template, title);
+    if (!href) return '';
+    return `<a class="pd-quicklink-chip" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${esc(l.name)}">
+      <span class="pd-quicklink-favicon"><img src="https://www.google.com/s2/favicons?sz=32&domain_url=${encodeURIComponent(href)}" loading="lazy" onerror="this.remove()"></span>${esc(l.name)}</a>`;
+  }).join('');
+  if (!row) return '';
+  return `<div class="pd-section pd-quicklinks"><div class="pd-section-label">Quick Links</div><div class="pd-quicklinks-list"><div class="pd-quicklink-chip-row">${row}</div></div></div>`;
+}
+
+function bindPopupQuickLinks(root) {
+  root.querySelectorAll('.pd-quicklink-chip').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const href = a.getAttribute('href');
+      if (href) { chrome.tabs.create({ url: href }); window.close(); }
+    });
+  });
+}
+
 function buildStatusDropdownHTML(currentVal, idPrefix) {
   const entries = [
     { val: 'watching', label: 'Watching', color: '#00b894' },
@@ -869,6 +907,7 @@ async function showDetail(tmdbId, mediaType, returnMode = 'list') {
     </div>
     ${overview ? `<div class="pd-overview">${esc(overview)}</div>` : ''}
     ${castHtml}
+    ${renderPopupQuickLinks(stored.title)}
     <div class="pd-section"><div class="pd-section-label">Status</div>
       ${buildStatusDropdownHTML(stored.watchStatus, 'pdSt')}
     </div>
@@ -881,8 +920,9 @@ async function showDetail(tmdbId, mediaType, returnMode = 'list') {
     ${relatedHtml}
   </div>`;
 
-  // Bind custom status dropdown
+  // Bind custom status dropdown and quick links
   bindDetailStatusDD('pdSt', tmdbId, mediaType, stored.title, stored.posterPath);
+  bindPopupQuickLinks(el);
 
   // Episode +/- (in-place update, no re-render)
   const updateEpInPlace = (sn, newVal) => {
@@ -1120,6 +1160,7 @@ async function showTMDBDetail(tmdbId, mediaType, returnMode = 'list') {
       </div>
       ${overview ? `<div class="pd-overview">${esc(overview)}</div>` : ''}
       ${castHtml}
+      ${renderPopupQuickLinks(title)}
       <div class="pd-actions">
         ${inList ? `<button class="pd-btn pd-btn-open" id="pdOpenFull">View in Dashboard</button>`
         : `<button class="pd-btn pd-btn-add" id="pdAdd">+ Add to List</button>`}
@@ -1130,6 +1171,8 @@ async function showTMDBDetail(tmdbId, mediaType, returnMode = 'list') {
         ${imdbId ? `<a href="https://www.imdb.com/title/${imdbId}" target="_blank">&#8599; IMDb</a>` : ''}
       </div>
     </div>`;
+
+    bindPopupQuickLinks(el);
 
     if (!inList) {
       el.querySelector('#pdAdd').addEventListener('click', async () => {

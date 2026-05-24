@@ -128,34 +128,7 @@
         <button class="modal-close-btn" id="closeSettings">&#10005;</button>
       </div>
       <div class="modal-body">
-        <div class="field">
-          <label>TMDB API Key</label>
-          <p class="field-hint">Get a free API key at <a href="https://www.themoviedb.org/settings/api"
-              target="_blank">themoviedb.org/settings/api</a></p>
-          <div class="input-row">
-            <input type="password" id="apiKeyInput" placeholder="Paste your TMDB v3 API key">
-            <button id="toggleKeyVis" class="icon-btn-sm">&#9673;</button>
-          </div>
-          <div class="settings-button-row">
-            <button id="saveApiKey" class="btn-accent">Save Key</button>
-            <button id="clearApiKey" class="btn-ghost btn-sync" type="button">Clear</button>
-          </div>
-        </div>
-
-        <div class="field">
-          <label>OMDb API Key <span class="field-hint-inline">optional, for IMDb ratings</span></label>
-          <p class="field-hint">Used only as an extra IMDb rating/vote source. TMDB remains the main discovery source.</p>
-          <div class="input-row">
-            <input type="password" id="omdbKeyInput" placeholder="Paste your OMDb API key">
-            <button id="toggleOmdbKeyVis" class="icon-btn-sm">&#9673;</button>
-          </div>
-          <div class="settings-button-row">
-            <button id="saveOmdbKey" class="btn-accent">Save OMDb Key</button>
-            <button id="clearOmdbKey" class="btn-ghost btn-sync" type="button">Clear</button>
-          </div>
-        </div>
-
-        <div class="field letterboxd-widget-settings">
+	    <div class="field letterboxd-widget-settings">
           <div class="settings-line-toggle">
             <div>
               <label for="letterboxdWidgetToggle">Letterboxd dice button</label>
@@ -165,6 +138,70 @@
               <input type="checkbox" id="letterboxdWidgetToggle">
               <span aria-hidden="true"></span>
             </label>
+          </div>
+        </div>
+		
+        <div class="field">
+          <button class="settings-accordion" id="apiKeysToggle" type="button">
+            <span>API Keys</span>
+            <span class="accordion-arrow" id="apiKeysArrow">&#9662;</span>
+          </button>
+          <div class="settings-panel" id="apiKeysPanel">
+            <div class="settings-subfield">
+              <label>TMDB API Key</label>
+              <p class="field-hint">Get a free API key at <a href="https://www.themoviedb.org/settings/api"
+                  target="_blank">themoviedb.org/settings/api</a></p>
+              <div class="input-row">
+                <input type="password" id="apiKeyInput" placeholder="Paste your TMDB v3 API key">
+                <button id="toggleKeyVis" class="icon-btn-sm">&#9673;</button>
+              </div>
+              <div class="settings-button-row">
+                <button id="saveApiKey" class="btn-accent">Save Key</button>
+                <button id="clearApiKey" class="btn-ghost btn-sync" type="button">Clear</button>
+              </div>
+            </div>
+
+            <div class="settings-subfield">
+              <label>OMDb API Key <span class="field-hint-inline">optional, for IMDb ratings</span></label>
+              <p class="field-hint">Used only as an extra IMDb rating/vote source. TMDB remains the main discovery source.</p>
+              <div class="input-row">
+                <input type="password" id="omdbKeyInput" placeholder="Paste your OMDb API key">
+                <button id="toggleOmdbKeyVis" class="icon-btn-sm">&#9673;</button>
+              </div>
+              <div class="settings-button-row">
+                <button id="saveOmdbKey" class="btn-accent">Save OMDb Key</button>
+                <button id="clearOmdbKey" class="btn-ghost btn-sync" type="button">Clear</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field quicklinks-settings">
+          <button class="settings-accordion" id="quickLinksToggle" type="button">
+            <span>Quick Links</span>
+            <span class="accordion-arrow" id="quickLinksArrow">&#9662;</span>
+          </button>
+          <div class="settings-panel" id="quickLinksPanel">
+            <p class="field-hint">Add search shortcuts that appear on movie and TV detail pages and inside the popup detail view.</p>
+            <div class="quicklink-placeholder-help">
+              <div><code>{searchterm}</code><span>good%20day</span></div>
+              <div><code>{searchtermPlus}</code><span>good+day</span></div>
+              <div><code>{searchtermMinus}</code><span>good-day</span></div>
+              <div><code>{searchtermUnderscore}</code><span>good_day</span></div>
+              <div><code>{searchtermRaw}</code><span>good day</span></div>
+            </div>
+            <p class="field-hint">Example: <code>https://xyz.com/search?q={searchtermPlus}/?adult</code></p>
+            <input type="hidden" id="quickLinkEditId">
+            <div class="quicklink-form-grid">
+              <input type="text" id="quickLinkName" placeholder="Name">
+              <input type="text" id="quickLinkUrl" placeholder="Search link, e.g. https://xyz.com/search?q={searchtermPlus}/?adult">
+            </div>
+            <div class="settings-button-row quicklink-actions">
+              <button id="saveQuickLink" class="btn-accent" type="button">Add</button>
+              <button id="cancelQuickLinkEdit" class="btn-ghost btn-sync hidden" type="button">Cancel</button>
+              <button id="toggleQuickLinkOrder" class="btn-ghost btn-sync" type="button" title="Rearrange quick links">☰ Arrange</button>
+            </div>
+            <div id="quickLinksList" class="quicklinks-list"></div>
           </div>
         </div>
         <hr>

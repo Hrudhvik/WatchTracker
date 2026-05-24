@@ -104,6 +104,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   const lbWidgetToggle = document.getElementById('letterboxdWidgetToggle');
   if (lbWidgetToggle) lbWidgetToggle.checked = Store.getLetterboxdWidgetEnabled ? Store.getLetterboxdWidgetEnabled() : true;
+  let quickLinksOrderMode = false;
+  renderQuickLinksSettings();
 
   App.refreshCounts();
   ListUI.init();
@@ -312,6 +314,243 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (Store.setLetterboxdWidgetEnabled) Store.setLetterboxdWidgetEnabled(enabled);
     else chrome.storage.local.set({ letterboxdWidgetEnabled: enabled });
     toast(enabled ? 'Letterboxd dice button enabled' : 'Letterboxd dice button disabled');
+  });
+
+  function normalizeQuickLinkUrl(value) {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return '';
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    return 'https://' + trimmed;
+  }
+
+  function isHttpUrl(value) {
+    if (!value) return true;
+    try {
+      const u = new URL(value);
+      return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch { return false; }
+  }
+
+  function resetQuickLinkForm() {
+    document.getElementById('quickLinkEditId').value = '';
+    document.getElementById('quickLinkName').value = '';
+    document.getElementById('quickLinkUrl').value = '';
+    document.getElementById('saveQuickLink').textContent = 'Add';
+    document.getElementById('cancelQuickLinkEdit').classList.add('hidden');
+  }
+
+  function quickLinkIcon(link) {
+    const href = link.url || link.animeUrl || link.mangaUrl || '';
+    return `<span class="quicklink-settings-favicon"><img src="https://www.google.com/s2/favicons?sz=32&domain_url=${encodeURIComponent(href)}" loading="lazy" onerror="this.remove()"></span>`;
+  }
+
+  function getEnabledQuickLinks() {
+    return Store.getQuickLinks().filter(link => link.enabled !== false);
+  }
+
+  function moveVisibleQuickLink(id, direction) {
+    const allLinks = Store.getQuickLinks().slice();
+    const visible = allLinks.filter(link => link.enabled !== false);
+    const visibleIndex = visible.findIndex(link => link.id === id);
+    const targetVisibleIndex = direction === 'up' ? visibleIndex - 1 : visibleIndex + 1;
+    if (visibleIndex < 0 || targetVisibleIndex < 0 || targetVisibleIndex >= visible.length) return false;
+
+    const moving = visible[visibleIndex];
+    const target = visible[targetVisibleIndex];
+    const withoutMoving = allLinks.filter(link => link.id !== moving.id);
+    let targetIndex = withoutMoving.findIndex(link => link.id === target.id);
+    if (targetIndex < 0) return false;
+    if (direction === 'down') targetIndex += 1;
+    withoutMoving.splice(targetIndex, 0, moving);
+    Store.setQuickLinks(withoutMoving);
+    return true;
+  }
+
+  function renderQuickLinksSettings() {
+    const list = document.getElementById('quickLinksList');
+    if (!list || !Store.getQuickLinks) return;
+    const links = Store.getQuickLinks();
+    const orderBtn = document.getElementById('toggleQuickLinkOrder');
+    if (orderBtn) orderBtn.textContent = quickLinksOrderMode ? '✓ Done' : '☰ Arrange';
+    if (!links.length) {
+      list.classList.remove('quicklinks-chip-grid', 'quicklinks-order-mode');
+      list.innerHTML = '<div class="quicklinks-empty">No quick links added yet.</div>';
+      return;
+    }
+    if (quickLinksOrderMode) {
+      const enabledLinks = getEnabledQuickLinks();
+      list.classList.remove('quicklinks-chip-grid');
+      list.classList.add('quicklinks-order-mode');
+      if (!enabledLinks.length) {
+        list.innerHTML = '<div class="quicklinks-empty">No visible quick links to arrange.</div>';
+        return;
+      }
+      list.innerHTML = enabledLinks.map((link, index) => `
+        <div class="quicklink-settings-item quicklink-order-item" data-id="${esc(link.id)}" draggable="true">
+          <span class="quicklink-drag-handle" aria-hidden="true">☰</span>
+          ${quickLinkIcon(link)}
+          <div class="quicklink-settings-main">
+            <strong>${esc(link.name)}</strong>
+          </div>
+          <div class="quicklink-settings-actions">
+            <button class="btn-ghost" type="button" data-action="up" ${index === 0 ? 'disabled' : ''}>↑</button>
+            <button class="btn-ghost" type="button" data-action="down" ${index === enabledLinks.length - 1 ? 'disabled' : ''}>↓</button>
+          </div>
+        </div>`).join('');
+      return;
+    }
+    list.classList.remove('quicklinks-order-mode');
+    list.classList.add('quicklinks-chip-grid');
+    list.innerHTML = links.map(link => {
+      const enabled = link.enabled !== false;
+      const isDefault = link.defaultLink === true || String(link.id || '').startsWith('default-');
+      return `
+        <div class="quicklink-settings-chip ${enabled ? 'enabled' : ''} ${isDefault ? 'default-link' : 'custom-link'}" data-id="${esc(link.id)}" role="button" tabindex="0" title="${enabled ? 'Click to hide' : 'Click to show'} ${esc(link.name)}">
+          <span class="quicklink-check" aria-hidden="true">${enabled ? '✓' : ''}</span>
+          ${quickLinkIcon(link)}
+          <span class="quicklink-chip-name">${esc(link.name)}</span>
+          ${isDefault ? '' : `
+            <span class="quicklink-chip-actions">
+              <button class="btn-ghost quicklink-icon-btn" type="button" data-action="edit" title="Edit quick link">✎</button>
+              <button class="btn-ghost quicklink-icon-btn" type="button" data-action="remove" title="Remove quick link">×</button>
+            </span>`}
+        </div>`;
+    }).join('');
+  }
+
+  const saveQuickLinkBtn = document.getElementById('saveQuickLink');
+  if (saveQuickLinkBtn) saveQuickLinkBtn.addEventListener('click', () => {
+    const id = document.getElementById('quickLinkEditId').value;
+    const link = {
+      name: document.getElementById('quickLinkName').value.trim(),
+      url: normalizeQuickLinkUrl(document.getElementById('quickLinkUrl').value),
+    };
+    if (!link.name) { toast('Enter a quick link name'); return; }
+    if (!link.url) { toast('Enter a search link'); return; }
+    if (!isHttpUrl(link.url)) { toast('Enter a valid search link'); return; }
+    if (id) {
+      Store.updateQuickLink(id, link);
+      toast('Quick link updated');
+    } else {
+      Store.addQuickLink(link);
+      toast('Quick link added');
+    }
+    resetQuickLinkForm();
+    renderQuickLinksSettings();
+  });
+
+  const cancelQuickLinkBtn = document.getElementById('cancelQuickLinkEdit');
+  if (cancelQuickLinkBtn) cancelQuickLinkBtn.addEventListener('click', resetQuickLinkForm);
+
+  const quickLinksList = document.getElementById('quickLinksList');
+  if (quickLinksList) {
+    const toggleQuickLinkRow = (row) => {
+      const id = row?.dataset.id;
+      const link = Store.getQuickLinks().find(l => l.id === id);
+      if (!link) return;
+      const enabled = link.enabled === false;
+      Store.toggleQuickLink(id, enabled);
+      renderQuickLinksSettings();
+      toast(enabled ? 'Quick link shown' : 'Quick link hidden');
+    };
+
+    quickLinksList.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action]');
+      const row = e.target.closest('[data-id]');
+      if (!row) return;
+      const id = row.dataset.id;
+      const link = Store.getQuickLinks().find(l => l.id === id);
+      if (!link) return;
+
+      if (btn) {
+        e.stopPropagation();
+        if (btn.dataset.action === 'up' || btn.dataset.action === 'down') {
+          moveVisibleQuickLink(id, btn.dataset.action);
+          renderQuickLinksSettings();
+          return;
+        }
+        const isDefault = link.defaultLink === true || String(link.id || '').startsWith('default-');
+        if (isDefault) return;
+        if (btn.dataset.action === 'remove') {
+          Store.removeQuickLink(id);
+          resetQuickLinkForm();
+          renderQuickLinksSettings();
+          toast('Quick link removed');
+          return;
+        }
+        if (btn.dataset.action === 'edit') {
+          document.getElementById('quickLinkEditId').value = link.id;
+          document.getElementById('quickLinkName').value = link.name || '';
+          document.getElementById('quickLinkUrl').value = link.url || link.animeUrl || link.mangaUrl || '';
+          document.getElementById('saveQuickLink').textContent = 'Save';
+          document.getElementById('cancelQuickLinkEdit').classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (!quickLinksOrderMode) toggleQuickLinkRow(row);
+    });
+
+    quickLinksList.addEventListener('keydown', (e) => {
+      if (quickLinksOrderMode) return;
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const row = e.target.closest('[data-id]');
+      if (!row) return;
+      e.preventDefault();
+      toggleQuickLinkRow(row);
+    });
+  }
+
+
+  let draggedQuickLinkId = null;
+  if (quickLinksList) {
+    quickLinksList.addEventListener('dragstart', (e) => {
+      const row = e.target.closest('.quicklink-order-item');
+      if (!row || !quickLinksOrderMode) return;
+      draggedQuickLinkId = row.dataset.id;
+      e.dataTransfer.effectAllowed = 'move';
+      row.classList.add('dragging');
+    });
+    quickLinksList.addEventListener('dragend', (e) => {
+      const row = e.target.closest('.quicklink-order-item');
+      if (row) row.classList.remove('dragging');
+      draggedQuickLinkId = null;
+    });
+    quickLinksList.addEventListener('dragover', (e) => {
+      if (!quickLinksOrderMode || !draggedQuickLinkId) return;
+      const row = e.target.closest('.quicklink-order-item');
+      if (!row) return;
+      e.preventDefault();
+      row.classList.add('drag-over');
+    });
+    quickLinksList.addEventListener('dragleave', (e) => {
+      const row = e.target.closest('.quicklink-order-item');
+      if (row) row.classList.remove('drag-over');
+    });
+    quickLinksList.addEventListener('drop', (e) => {
+      if (!quickLinksOrderMode || !draggedQuickLinkId) return;
+      const row = e.target.closest('.quicklink-order-item');
+      if (!row) return;
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      const targetId = row.dataset.id;
+      if (!targetId || targetId === draggedQuickLinkId) return;
+      const links = Store.getQuickLinks().slice();
+      const from = links.findIndex(l => l.id === draggedQuickLinkId);
+      const to = links.findIndex(l => l.id === targetId);
+      if (from < 0 || to < 0) return;
+      const [moved] = links.splice(from, 1);
+      links.splice(to, 0, moved);
+      Store.setQuickLinks(links);
+      renderQuickLinksSettings();
+    });
+  }
+
+  const toggleQuickLinkOrderBtn = document.getElementById('toggleQuickLinkOrder');
+  if (toggleQuickLinkOrderBtn) toggleQuickLinkOrderBtn.addEventListener('click', () => {
+    quickLinksOrderMode = !quickLinksOrderMode;
+    resetQuickLinkForm();
+    renderQuickLinksSettings();
   });
 
   document.getElementById('toggleMalKeyVis').addEventListener('click', () => {
@@ -721,13 +960,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  // ─── Theme Accordion Toggle ───
-  document.getElementById('themeToggle').addEventListener('click', () => {
-    const panel = document.getElementById('themePanel');
-    const arrow = document.getElementById('themeArrow');
-    panel.classList.toggle('open');
-    arrow.classList.toggle('open');
-  });
+  function bindSettingsAccordion(toggleId, panelId, arrowId) {
+    const toggle = document.getElementById(toggleId);
+    if (!toggle) return;
+    toggle.addEventListener('click', () => {
+      const panel = document.getElementById(panelId);
+      const arrow = document.getElementById(arrowId);
+      panel.classList.toggle('open');
+      arrow.classList.toggle('open');
+    });
+  }
+
+  // ─── Settings Accordion Toggles ───
+  bindSettingsAccordion('apiKeysToggle', 'apiKeysPanel', 'apiKeysArrow');
+  bindSettingsAccordion('quickLinksToggle', 'quickLinksPanel', 'quickLinksArrow');
+  bindSettingsAccordion('themeToggle', 'themePanel', 'themeArrow');
 
   // ─── Theme Preset Swatches ───
   document.querySelectorAll('.theme-swatch').forEach(btn => {

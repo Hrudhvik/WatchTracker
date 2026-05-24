@@ -2,8 +2,25 @@
    Store — chrome.storage.local wrapper
    ═══════════════════════════════════════════ */
 
+
+const DEFAULT_QUICK_LINKS = [
+  { id: 'default-netflix', name: 'Netflix', url: 'https://www.netflix.com/search?q={searchterm}', enabled: true, defaultLink: true },
+  { id: 'default-prime-video', name: 'Prime Video', url: 'https://www.primevideo.com/search/ref=atv_nb_sr?phrase={searchterm}&ie=UTF8', enabled: true, defaultLink: true },
+  { id: 'default-hulu', name: 'Hulu', url: 'https://www.hulu.com/search?q={searchterm}', enabled: true, defaultLink: true },
+  { id: 'default-youtube', name: 'YouTube', url: 'https://www.youtube.com/results?search_query={searchtermPlus}', enabled: true, defaultLink: true },
+
+  // More streaming defaults can be re-enabled later if needed.
+  // { id: 'default-disney-plus', name: 'Disney+', url: 'https://www.disneyplus.com/search?q={searchterm}', enabled: true, defaultLink: true },
+  // { id: 'default-apple-tv', name: 'Apple TV', url: 'https://tv.apple.com/search?term={searchterm}', enabled: true, defaultLink: true },
+  // { id: 'default-max', name: 'Max', url: 'https://play.max.com/search?q={searchterm}', enabled: true, defaultLink: true },
+  // { id: 'default-paramount-plus', name: 'Paramount+', url: 'https://www.paramountplus.com/search/?q={searchterm}', enabled: true, defaultLink: true },
+  // { id: 'default-peacock', name: 'Peacock', url: 'https://www.peacocktv.com/search?q={searchterm}', enabled: true, defaultLink: true },
+  // { id: 'default-tubi', name: 'Tubi', url: 'https://tubitv.com/search/{searchtermPlus}', enabled: true, defaultLink: true },
+];
+const ACTIVE_DEFAULT_QUICK_LINK_IDS = new Set(DEFAULT_QUICK_LINKS.map(link => link.id));
+
 const Store = {
-  _data: { apiKey: '', omdbKey: '', movies: [], tvshows: [], diary: [], activity: [], theme: null, popupPrefs: null, letterboxdWidgetEnabled: true },
+  _data: { apiKey: '', omdbKey: '', movies: [], tvshows: [], diary: [], activity: [], theme: null, popupPrefs: null, letterboxdWidgetEnabled: true, quickLinks: [], quickLinkDefaultsSeeded: false },
   _nextId: 1,
 
   _assignIds() {
@@ -18,7 +35,7 @@ const Store = {
 
   async load() {
     return new Promise(resolve => {
-      chrome.storage.local.get(['apiKey', 'omdbKey', 'movies', 'tvshows', 'diary', 'activity', 'theme', 'popupPrefs', 'letterboxdWidgetEnabled'], d => {
+      chrome.storage.local.get(['apiKey', 'omdbKey', 'movies', 'tvshows', 'diary', 'activity', 'theme', 'popupPrefs', 'letterboxdWidgetEnabled', 'quickLinks', 'quickLinkDefaultsSeeded'], d => {
         this._data.apiKey = d.apiKey || '';
         this._data.omdbKey = d.omdbKey || '';
         this._data.movies = d.movies || [];
@@ -28,6 +45,20 @@ const Store = {
         this._data.theme = d.theme || null;
         this._data.popupPrefs = d.popupPrefs || null;
         this._data.letterboxdWidgetEnabled = d.letterboxdWidgetEnabled !== false;
+        this._data.quickLinkDefaultsSeeded = d.quickLinkDefaultsSeeded === true;
+        let quickLinks = Array.isArray(d.quickLinks) ? d.quickLinks : [];
+        quickLinks = quickLinks
+          .map(l => ({ ...l, url: l.url || l.animeUrl || l.mangaUrl || '', enabled: l.enabled !== false }))
+          .filter(l => !(l.defaultLink === true || String(l.id || '').startsWith('default-')) || ACTIVE_DEFAULT_QUICK_LINK_IDS.has(l.id));
+        if (!this._data.quickLinkDefaultsSeeded) {
+          const existingIds = new Set(quickLinks.map(l => l.id));
+          const existingNames = new Set(quickLinks.map(l => (l.name || '').toLowerCase()));
+          const defaultsToAdd = DEFAULT_QUICK_LINKS.filter(l => !existingIds.has(l.id) && !existingNames.has(l.name.toLowerCase()));
+          quickLinks = [...defaultsToAdd, ...quickLinks];
+          this._data.quickLinkDefaultsSeeded = true;
+          chrome.storage.local.set({ quickLinks, quickLinkDefaultsSeeded: true });
+        }
+        this._data.quickLinks = quickLinks;
         this._assignIds();
         resolve(this._data);
       });
@@ -203,6 +234,64 @@ const Store = {
   setTheme(t) { this._data.theme = t; chrome.storage.local.set({ theme: t }); },
   getPopupPrefs() { return this._data.popupPrefs; },
   setPopupPrefs(p) { this._data.popupPrefs = p; chrome.storage.local.set({ popupPrefs: p }); },
+
+  // ─── Custom Quick Links ───
+  getQuickLinks() { return this._data.quickLinks || []; },
+  setQuickLinks(links) {
+    this._data.quickLinks = Array.isArray(links) ? links.map(l => ({ ...l, enabled: l.enabled !== false })) : [];
+    chrome.storage.local.set({ quickLinks: this._data.quickLinks });
+  },
+  addQuickLink(link) {
+    const clean = {
+      id: link.id || Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+      name: (link.name || '').trim(),
+      url: (link.url || link.animeUrl || link.mangaUrl || '').trim(),
+      enabled: link.enabled !== false,
+      defaultLink: link.defaultLink === true,
+    };
+    if (!clean.name || !clean.url) return false;
+    this._data.quickLinks = this.getQuickLinks();
+    this._data.quickLinks.push(clean);
+    chrome.storage.local.set({ quickLinks: this._data.quickLinks });
+    return clean;
+  },
+  updateQuickLink(id, updates) {
+    const idx = this.getQuickLinks().findIndex(l => l.id === id);
+    if (idx === -1) return false;
+    const clean = {
+      ...this._data.quickLinks[idx],
+      name: (updates.name || '').trim(),
+      url: (updates.url || updates.animeUrl || updates.mangaUrl || '').trim(),
+    };
+    if ('enabled' in updates) clean.enabled = updates.enabled !== false;
+    delete clean.animeUrl;
+    delete clean.mangaUrl;
+    if (!clean.name || !clean.url) return false;
+    this._data.quickLinks[idx] = clean;
+    chrome.storage.local.set({ quickLinks: this._data.quickLinks });
+    return true;
+  },
+  toggleQuickLink(id, enabled) {
+    const idx = this.getQuickLinks().findIndex(l => l.id === id);
+    if (idx === -1) return false;
+    this._data.quickLinks[idx] = { ...this._data.quickLinks[idx], enabled: enabled !== false };
+    chrome.storage.local.set({ quickLinks: this._data.quickLinks });
+    return true;
+  },
+  moveQuickLink(id, direction) {
+    const links = this.getQuickLinks().slice();
+    const idx = links.findIndex(l => l.id === id);
+    const target = direction === 'up' ? idx - 1 : idx + 1;
+    if (idx < 0 || target < 0 || target >= links.length) return false;
+    [links[idx], links[target]] = [links[target], links[idx]];
+    this.setQuickLinks(links);
+    return true;
+  },
+  removeQuickLink(id) {
+    this._data.quickLinks = this.getQuickLinks().filter(l => l.id !== id);
+    chrome.storage.local.set({ quickLinks: this._data.quickLinks });
+  },
+
   getLetterboxdWidgetEnabled() { return this._data.letterboxdWidgetEnabled !== false; },
   setLetterboxdWidgetEnabled(enabled) {
     this._data.letterboxdWidgetEnabled = enabled !== false;
@@ -364,6 +453,7 @@ const Store = {
       tvshows: this._data.tvshows,
       diary: this._data.diary,
       activity: this._data.activity,
+      quickLinks: this._data.quickLinks,
       exportedAt: new Date().toISOString(),
     }, null, 2);
   },
@@ -375,6 +465,7 @@ const Store = {
       if (data.tvshows) this._data.tvshows = data.tvshows;
       if (data.diary) this._data.diary = data.diary;
       if (data.activity) this._data.activity = data.activity;
+      if (data.quickLinks) this._data.quickLinks = data.quickLinks;
     } else {
       // Merge mode — add new items, don't overwrite existing
       const stats = { moviesAdded: 0, tvAdded: 0, diaryAdded: 0 };
@@ -405,6 +496,19 @@ const Store = {
           }
         });
       }
+      if (data.quickLinks) {
+        const existingNames = new Set(this.getQuickLinks().map(l => (l.name || '').toLowerCase()));
+        data.quickLinks.forEach(l => {
+          if (l && l.name && !existingNames.has(l.name.toLowerCase())) {
+            this._data.quickLinks.push({
+              id: l.id || Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+              name: l.name,
+              url: l.url || l.animeUrl || l.mangaUrl || '',
+            });
+            existingNames.add(l.name.toLowerCase());
+          }
+        });
+      }
       if (data.activity) {
         data.activity.forEach(a => {
           if (!this._data.activity.find(ex => ex.timestamp === a.timestamp)) {
@@ -418,7 +522,7 @@ const Store = {
     }
     this._saveMovies();
     this._saveTvShows();
-    chrome.storage.local.set({ diary: this._data.diary, activity: this._data.activity });
+    chrome.storage.local.set({ diary: this._data.diary, activity: this._data.activity, quickLinks: this._data.quickLinks });
     return { movies: this._data.movies.length, tvshows: this._data.tvshows.length, diary: this._data.diary.length };
   },
 
@@ -427,8 +531,9 @@ const Store = {
     this._data.tvshows = [];
     this._data.diary = [];
     this._data.activity = [];
+    this._data.quickLinks = [];
     this._saveMovies();
     this._saveTvShows();
-    chrome.storage.local.set({ diary: [], activity: [] });
+    chrome.storage.local.set({ diary: [], activity: [], quickLinks: [] });
   },
 };

@@ -3,6 +3,32 @@
 const DetailUI = {
   _navHistory: [], // Stack of {tmdbId, mediaType} for back navigation through related anime
 
+  _quickLinkUrl(template, title) {
+    if (!template) return '';
+    const raw = (title || '').trim();
+    const collapsed = raw.replace(/\s+/g, ' ');
+    const map = {
+      searchterm: encodeURIComponent(collapsed),
+      searchtermPlus: collapsed.split(' ').map(encodeURIComponent).join('+'),
+      searchtermMinus: collapsed.toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, ''),
+      searchtermUnderscore: collapsed.toLowerCase().replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, ''),
+      searchtermRaw: collapsed,
+    };
+    return template.replace(/\{(searchtermPlus|searchtermMinus|searchtermUnderscore|searchtermRaw|searchterm)\}/g, (_, key) => map[key]);
+  },
+
+  _renderQuickLinks(title) {
+    const links = Store.getQuickLinks ? Store.getQuickLinks().filter(l => l.enabled !== false) : [];
+    const row = links.map(l => {
+      const template = l.url || l.animeUrl || l.mangaUrl || '';
+      const href = this._quickLinkUrl(template, title);
+      if (!href) return '';
+      return `<a class="quicklink-chip" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${esc(l.name)}"><span class="quicklink-favicon"><img src="https://www.google.com/s2/favicons?sz=32&domain_url=${encodeURIComponent(href)}" loading="lazy" onerror="this.remove()"></span>${esc(l.name)}</a>`;
+    }).join('');
+    if (!row) return '';
+    return `<div class="detail-section quicklinks-detail-section"><h3>Quick Links</h3><div class="quicklinks-detail-list"><div class="quicklink-chip-row">${row}</div></div></div>`;
+  },
+
   async open(tmdbId, mediaType, pushHistory = true) {
     const page = document.getElementById('page-detail');
     page.innerHTML = '<div style="padding:40px;color:var(--text-3)">Loading...</div>';
@@ -333,6 +359,7 @@ const DetailUI = {
       </div>
       <div class="detail-body">
         ${d.overview?`<div class="detail-section"><h3>Overview</h3><p class="detail-overview">${esc(d.overview)}</p></div>`:''}
+        ${this._renderQuickLinks(title)}
         ${seasonHtml}
         <div class="detail-section"><h3>Details</h3><div class="detail-info-grid">${info}</div></div>
         ${cast.length?`<div class="detail-section"><h3>Cast</h3><div class="cast-row">${cast.map(c=>{const p=TMDB.profile(c.profile_path);return`<div class="cast-card">${p?`<img src="${p}" loading="lazy">`:'<div class="cast-ph"></div>'}<div class="cast-name">${esc(c.name)}</div><div class="cast-char">${esc(c.character||'')}</div></div>`;}).join('')}</div></div>`:''}
