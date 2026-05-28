@@ -33,6 +33,9 @@ const DetailUI = {
     const page = document.getElementById('page-detail');
     page.innerHTML = '<div style="padding:40px;color:var(--text-3)">Loading...</div>';
     App.showPage('detail');
+    if (window.location.hash !== `#detail-${mediaType}-${tmdbId}`) {
+      history.replaceState(null, '', `#detail-${mediaType}-${tmdbId}`);
+    }
 
     // Push previous page to history for back navigation (unless we're going back)
     if (pushHistory && this._currentDetail) {
@@ -397,24 +400,37 @@ const DetailUI = {
         ${recs.length?`<div class="detail-section"><h3>Recommended</h3><div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;">${recs.map(r=>{const rP=TMDB.poster(r.poster_path,'w185');const rT=r.media_type||(r.first_air_date?'tv':'movie');return`<div class="grid-card" data-tmdb="${r.id}" data-type="${rT}" style="flex-shrink:0;width:130px;"><div class="poster-wrap" style="aspect-ratio:2/3;">${rP?`<img src="${rP}" loading="lazy">`:`<div class="no-poster-ph">${ph}</div>`}<div class="poster-overlay"></div></div><div class="grid-card-info"><div class="grid-card-title">${esc(r.title||r.name)}</div></div></div>`;}).join('')}</div></div>`:''}
       </div>`;
 
-    page.querySelector('#detailBackBtn').addEventListener('click', () => { if (DetailUI._navHistory.length > 0) { const prev = DetailUI._navHistory.pop(); DetailUI.open(prev.tmdbId, prev.mediaType, false); } else { App.showPage(currentView || 'watchlist'); } });
+    page.querySelector('#detailBackBtn').addEventListener('click', () => { if (DetailUI._navHistory.length > 0) { const prev = DetailUI._navHistory.pop(); DetailUI.open(prev.tmdbId, prev.mediaType, false); } else if (App.returnFromDetailIfPossible && App.returnFromDetailIfPossible()) { /* returned to search */ } else { App.showPage(currentView || 'watchlist'); } });
 
     const addBtn = page.querySelector('#detailAddBtn');
     if (addBtn) addBtn.addEventListener('click', () => {
-      if (isAnime && !isM && stored?.malId) {
-        // Anime TV: add with malId, flat season, sourceTag
-        Store.addTvShow({
-          tmdbId: stored.tmdbId, malId: stored.malId,
-          malTmdbId: stored.malTmdbId || null,
-          title: d.name || title, posterPath: d.poster_path, backdropPath: d.backdrop_path,
-          year: parseInt(year)||0, voteAverage: d.vote_average||0,
-          totalSeasons: 1, totalEpisodes: d.number_of_episodes||0, genres,
-          watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [],
-          startDate: '', endDate: '',
-          seasons: [{ seasonNumber: 1, episodeCount: d.number_of_episodes||0, episodesWatched: 0 }],
-          dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString(),
-          sourceTag: 'anime',
-        });
+      if (isAnime && stored?.malId) {
+        // MAL-authoritative anime entry. Movies stay in movies; TV/OVA/Special stay in TV list.
+        if (isM) {
+          Store.addMovie({
+            tmdbId: stored.tmdbId, malId: stored.malId,
+            title: d.title || title, posterPath: d.poster_path, backdropPath: d.backdrop_path,
+            year: parseInt(year)||0, voteAverage: d.vote_average||0, runtime:rt, genres,
+            watchStatus:'plan_to_watch', rewatchCount:0, rewatchHistory:[], startDate:'', endDate:'',
+            dateAdded:new Date().toISOString(), dateUpdated:new Date().toISOString(),
+            sourceTag:'anime', syncSource:'mal-search', mediaType:'movie',
+            externalIds:[{ provider:'mal', providerType:'anime', id: stored.malId, relation:'primary' }],
+          });
+        } else {
+          Store.addTvShow({
+            tmdbId: stored.tmdbId, malId: stored.malId,
+            malTmdbId: stored.malTmdbId || null,
+            title: d.name || title, posterPath: d.poster_path, backdropPath: d.backdrop_path,
+            year: parseInt(year)||0, voteAverage: d.vote_average||0,
+            totalSeasons: 1, totalEpisodes: d.number_of_episodes||0, genres,
+            watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [],
+            startDate: '', endDate: '',
+            seasons: [{ seasonNumber: 1, episodeCount: d.number_of_episodes||0, episodesWatched: 0 }],
+            dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString(),
+            sourceTag: 'anime', syncSource:'mal-search', mediaType:'tv',
+            externalIds:[{ provider:'mal', providerType:'anime', id: stored.malId, relation:'primary' }],
+          });
+        }
       } else if (isM) {
         Store.addMovie({ tmdbId:d.id, title:d.title, posterPath:d.poster_path, backdropPath:d.backdrop_path, year:parseInt(year)||0, voteAverage:d.vote_average||0, runtime:rt, genres, watchStatus:'plan_to_watch', rewatchCount:0, rewatchHistory:[], startDate:'', endDate:'', dateAdded:new Date().toISOString(), dateUpdated:new Date().toISOString() });
       } else {
@@ -1230,7 +1246,7 @@ const DetailUI = {
         </div>
       </div>`;
 
-    page.querySelector('#detailBackBtn').addEventListener('click', () => { if (DetailUI._navHistory.length > 0) { const prev = DetailUI._navHistory.pop(); DetailUI.open(prev.tmdbId, prev.mediaType, false); } else { App.showPage(currentView || 'watchlist'); } });
+    page.querySelector('#detailBackBtn').addEventListener('click', () => { if (DetailUI._navHistory.length > 0) { const prev = DetailUI._navHistory.pop(); DetailUI.open(prev.tmdbId, prev.mediaType, false); } else if (App.returnFromDetailIfPossible && App.returnFromDetailIfPossible()) { /* returned to search */ } else { App.showPage(currentView || 'watchlist'); } });
     page.querySelector('#failedLinkBtn').addEventListener('click', () => this._manualSyncModal(tmdbId, isM ? 'movie' : 'tv', stored));
     page.querySelector('#failedRemoveBtn').addEventListener('click', () => {
       if (confirm('Remove "' + title + '" from your list?')) {

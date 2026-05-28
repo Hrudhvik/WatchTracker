@@ -1,3 +1,7 @@
+// Shared recommender for extension pages/content scripts. Best-effort: if a script fails
+// to load, the fetch proxy and widget fallback still work.
+try { importScripts('store.js', 'tmdb.js', 'recommendations.js'); } catch (e) { console.warn('Recommendation bridge unavailable', e); }
+
 /* ═══════════════════════════════════════════
    Background Service Worker — Fetch Proxy + Auto Sync
    All cross-origin fetches go through here to bypass CORS.
@@ -22,6 +26,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
     })();
     return true; // keep message channel open for async response
+  }
+
+  if (msg.type === 'watchtracker:recommend') {
+    (async () => {
+      try {
+        if (typeof Store === 'undefined' || typeof TMDB === 'undefined' || typeof Recommendations === 'undefined') {
+          throw new Error('Recommendation engine is not available in the background worker.');
+        }
+        await Store.load();
+        TMDB.setKey(Store.getApiKey());
+        const filters = {
+          source: 'new',
+          type: 'movie',
+          style: msg.filters?.style || 'random',
+          count: Number(msg.filters?.count || 1),
+          genre: msg.filters?.genre || '',
+          language: msg.filters?.language || '',
+          decade: msg.filters?.decade || '',
+          minTmdbRating: msg.filters?.minTmdbRating || msg.filters?.rating || '',
+          libraryMode: msg.filters?.includeWatched ? 'include_library' : 'new_only',
+        };
+        const result = await Recommendations.suggest(filters);
+        sendResponse({ ok: true, body: result });
+      } catch (err) {
+        sendResponse({ ok: false, status: 0, error: err.message || String(err) });
+      }
+    })();
+    return true;
   }
 });
 

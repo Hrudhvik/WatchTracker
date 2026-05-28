@@ -1,4 +1,39 @@
-/* Popup — list + detail + TMDB search, TV first, persistent prefs */
+/* Popup — list + detail + TMDB + MAL search, persistent prefs */
+
+// Route external API fetches through background.js when available (MV3/CORS-safe).
+async function popupBgFetch(url, options) {
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+    try {
+      return await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: 'fetch', url, options: options || {} }, response => {
+          if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+          if (!response) { reject(new Error('No response from background worker')); return; }
+          resolve(response);
+        });
+      });
+    } catch (_) { /* fall through to normal fetch */ }
+  }
+  const res = await fetch(url, options || {});
+  let body = null;
+  try { body = await res.json(); } catch (_) { body = await res.text(); }
+  return { ok: res.ok, status: res.status, body };
+}
+
+function popupIsMalMovie(anime) {
+  return String(anime?.type || '').toLowerCase() === 'movie';
+}
+
+function popupMalPoster(anime) {
+  return anime?.images?.webp?.image_url || anime?.images?.jpg?.image_url || anime?.image_url || '';
+}
+
+function popupMalYear(anime) {
+  return anime?.year || (anime?.aired?.from ? parseInt(String(anime.aired.from).substring(0, 4)) : 0) || 0;
+}
+
+function popupMalTitle(anime) {
+  return anime?.title_english || anime?.title || anime?.title_japanese || 'Untitled';
+}
 
 const STATUS_CFG = {
   watching: { label: 'Watching', color: '#00b894' },
@@ -13,17 +48,46 @@ let pFilter = 'watching', pType = 'all', pSort = 'dateUpdated', pView = 'list', 
 let pMode = 'list';
 let pReturnMode = 'list';
 let pSearchTimeout = null;
+let pLastSearchQuery = '';
 let pRecCache = { html: '', summary: '', filters: null, results: [] };
+
+function setPopupModeTabs(mode) {
+  const switcher = document.getElementById('pModeSwitch');
+  const lib = document.getElementById('pModeLibrary');
+  const ext = document.getElementById('pModeExternal');
+  if (!switcher || !lib || !ext) return;
+  const visible = mode === 'list-search' || mode === 'search';
+  switcher.classList.toggle('hidden', !visible);
+  lib.classList.toggle('active', mode === 'list-search');
+  ext.classList.toggle('active', mode === 'search');
+}
+
+function showPopupSearchPage(activeMode) {
+  const page = document.getElementById('pSearchPage');
+  const localInput = document.getElementById('pSearch');
+  const extInput = document.getElementById('pTmdbSearch');
+  if (!page || !localInput || !extInput) return;
+  page.classList.remove('hidden');
+  const external = activeMode === 'search';
+  localInput.classList.toggle('hidden', external);
+  extInput.classList.toggle('hidden', !external);
+  setPopupModeTabs(activeMode);
+}
+
+function hidePopupSearchPage() {
+  const page = document.getElementById('pSearchPage');
+  if (page) page.classList.add('hidden');
+  setPopupModeTabs('hidden');
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
   await Store.load();
   const apiKey = Store.getApiKey();
   if (apiKey) TMDB.setKey(apiKey);
-  const omdbKey = Store.getOmdbKey ? Store.getOmdbKey() : '';
-  if (omdbKey && window.OMDB) OMDB.setKey(omdbKey);
   applyPopupTheme();
   restorePrefs();
   renderList();
+  hidePopupSearchPage();
 
   document.getElementById('pOpenTab').addEventListener('click', () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('app.html') }); window.close();
@@ -32,6 +96,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('app.html') + '#settings' }); window.close();
   });
   document.getElementById('pClose').addEventListener('click', () => window.close());
+  document.getElementById('pSearchBtn').addEventListener('click', () => enterTMDBMode(true));
+
+  const pModeLibrary = document.getElementById('pModeLibrary');
+  const pModeExternal = document.getElementById('pModeExternal');
+  if (pModeLibrary) pModeLibrary.addEventListener('click', () => enterLibrarySearchMode(true));
+  if (pModeExternal) pModeExternal.addEventListener('click', () => enterTMDBMode(true));
 
   // Diary view
   document.getElementById('pDiaryBtn').addEventListener('click', () => enterDiaryMode());
@@ -40,13 +110,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Back — returns to the previous popup view when possible
   document.getElementById('pBack').addEventListener('click', () => {
     if (pMode === 'detail' && pReturnMode === 'recommendations') enterRecommendationsMode(false);
+    else if (pMode === 'detail' && pReturnMode === 'search') returnToPopupSearch();
+    else if (pMode === 'detail' && pReturnMode === 'list-search') enterLibrarySearchMode(true);
+    else if (pMode === 'search' || pMode === 'list-search') goBackToList();
     else goBackToList();
   });
 
-  // + Add New button — enters TMDB search mode
-  document.getElementById('pAddNew').addEventListener('click', () => {
-    enterTMDBMode();
-  });
 
   // Type toggle
   document.querySelectorAll('.p-type').forEach(b => b.addEventListener('click', () => {
@@ -69,6 +138,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Local list filter (the main search bar)
   document.getElementById('pSearch').addEventListener('input', (e) => {
     pQuery = e.target.value.trim().toLowerCase();
+    if (pMode !== 'list-search') pMode = 'list-search';
     renderList();
   });
 
@@ -78,18 +148,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     clearTimeout(pSearchTimeout);
     const q = e.target.value.trim();
     if (!q) {
-      document.getElementById('pList').innerHTML = '<div class="p-search-msg">Type to search TMDB for movies and TV shows</div>';
+      document.getElementById('pList').innerHTML = '<div class="p-search-msg">Type to search TMDB and MAL for movies, TV shows, and anime</div>';
       return;
     }
-    if (q.length >= 2 && TMDB.getKey()) {
-      document.getElementById('pList').innerHTML = '<div class="p-search-msg">Searching...</div>';
+    if (q.length >= 2) {
+      document.getElementById('pList').innerHTML = '<div class="p-search-msg">Searching TMDB + MAL...</div>';
       pSearchTimeout = setTimeout(() => searchTMDB(q), 350);
     }
   });
   tmdbInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       const q = tmdbInput.value.trim();
-      if (q.length >= 2 && TMDB.getKey()) { clearTimeout(pSearchTimeout); searchTMDB(q); }
+      if (q.length >= 2) { clearTimeout(pSearchTimeout); searchTMDB(q); }
     }
     if (e.key === 'Escape') goBackToList();
   });
@@ -225,12 +295,12 @@ function closeSortDD() {
 
 function goBackToList() {
   pMode = 'list';
+  hidePopupSearchPage();
   pReturnMode = 'list';
   document.getElementById('pBack').classList.add('hidden');
   document.getElementById('pControls').classList.remove('hidden');
-  document.getElementById('pTmdbBar').classList.add('hidden');
-  document.getElementById('pSearch').parentElement.classList.remove('hidden');
-  document.getElementById('pAddNew').classList.remove('hidden');
+  document.getElementById('pSearchBtn').classList.remove('hidden');
+  document.getElementById('pAddNew')?.classList.remove('hidden');
   document.getElementById('pDiaryBtn').classList.remove('hidden');
   document.getElementById('pRecBtn').classList.remove('hidden');
   document.getElementById('pTmdbSearch').value = '';
@@ -240,13 +310,42 @@ function goBackToList() {
   renderList();
 }
 
-function enterDiaryMode() {
-  pMode = 'diary';
+function enterLibrarySearchMode(preserveQuery = true) {
+  pMode = 'list-search';
+  pReturnMode = 'list-search';
   document.getElementById('pBack').classList.remove('hidden');
   document.getElementById('pControls').classList.add('hidden');
-  document.getElementById('pTmdbBar').classList.add('hidden');
-  document.getElementById('pSearch').parentElement.classList.add('hidden');
-  document.getElementById('pAddNew').classList.add('hidden');
+  showPopupSearchPage('list-search');
+  document.getElementById('pSearchBtn').classList.add('hidden');
+  document.getElementById('pAddNew')?.classList.add('hidden');
+  document.getElementById('pDiaryBtn').classList.add('hidden');
+  document.getElementById('pRecBtn').classList.add('hidden');
+  document.getElementById('pEmpty').classList.add('hidden');
+  const input = document.getElementById('pSearch');
+  if (!preserveQuery) { input.value = ''; pQuery = ''; }
+  else pQuery = input.value.trim().toLowerCase();
+  renderList();
+  setTimeout(() => input.focus(), 50);
+}
+
+function returnToPopupSearch() {
+  const input = document.getElementById('pTmdbSearch');
+  const query = (input.value || pLastSearchQuery || '').trim();
+  enterTMDBMode(true);
+  if (query.length >= 2) {
+    input.value = query;
+    searchTMDB(query);
+  }
+}
+
+function enterDiaryMode() {
+  pMode = 'diary';
+  setPopupModeTabs('hidden');
+  document.getElementById('pBack').classList.remove('hidden');
+  document.getElementById('pControls').classList.add('hidden');
+  hidePopupSearchPage();
+  document.getElementById('pSearchBtn').classList.add('hidden');
+  document.getElementById('pAddNew')?.classList.add('hidden');
   document.getElementById('pDiaryBtn').classList.add('hidden');
   document.getElementById('pRecBtn').classList.add('hidden');
   document.getElementById('pEmpty').classList.add('hidden');
@@ -332,29 +431,38 @@ function renderPopupDiary() {
   });
 }
 
-function enterTMDBMode() {
+function enterTMDBMode(preserveQuery = false) {
   pMode = 'search';
+  pReturnMode = 'search';
   document.getElementById('pBack').classList.remove('hidden');
   document.getElementById('pControls').classList.add('hidden');
-  document.getElementById('pTmdbBar').classList.remove('hidden');
-  document.getElementById('pSearch').parentElement.classList.add('hidden');
-  document.getElementById('pAddNew').classList.add('hidden');
+  showPopupSearchPage('search');
+  document.getElementById('pSearchBtn').classList.add('hidden');
+  document.getElementById('pAddNew')?.classList.add('hidden');
+  document.getElementById('pDiaryBtn').classList.add('hidden');
   document.getElementById('pRecBtn').classList.add('hidden');
   document.getElementById('pEmpty').classList.add('hidden');
+  const input = document.getElementById('pTmdbSearch');
+  if (!preserveQuery) input.value = '';
   const el = document.getElementById('pList');
-  el.innerHTML = '<div class="p-search-msg">Type to search TMDB for movies and TV shows</div>';
-  setTimeout(() => document.getElementById('pTmdbSearch').focus(), 50);
+  if (!preserveQuery || !input.value.trim()) {
+    el.innerHTML = '<div class="p-search-msg">Type to search TMDB and MAL for movies, TV shows, and anime</div>';
+  } else if (input.value.trim().length >= 2) {
+    searchTMDB(input.value.trim());
+  }
+  setTimeout(() => input.focus(), 50);
 }
 
 
 function enterRecommendationsMode(reset = false) {
   pMode = 'recommendations';
+  setPopupModeTabs('hidden');
   pReturnMode = 'list';
   document.getElementById('pBack').classList.remove('hidden');
   document.getElementById('pControls').classList.add('hidden');
-  document.getElementById('pTmdbBar').classList.add('hidden');
-  document.getElementById('pSearch').parentElement.classList.add('hidden');
-  document.getElementById('pAddNew').classList.add('hidden');
+  hidePopupSearchPage();
+  document.getElementById('pSearchBtn').classList.add('hidden');
+  document.getElementById('pAddNew')?.classList.add('hidden');
   document.getElementById('pDiaryBtn').classList.add('hidden');
   document.getElementById('pRecBtn').classList.add('hidden');
   document.getElementById('pEmpty').classList.add('hidden');
@@ -555,9 +663,20 @@ function renderList() {
     ...Store.getTvShows().map(t => ({ ...t, mediaType: 'tv' })),
     ...Store.getMovies().map(m => ({ ...m, mediaType: 'movie' })),
   ];
-  if (pFilter !== 'all') items = items.filter(i => i.watchStatus === pFilter);
-  if (pType !== 'all') items = items.filter(i => i.mediaType === pType);
-  if (pQuery) items = items.filter(i => i.title.toLowerCase().includes(pQuery));
+  const el = document.getElementById('pList');
+  const empty = document.getElementById('pEmpty');
+  if (pMode === 'list-search') {
+    if (!pQuery) {
+      el.innerHTML = '<div class="p-search-msg">Type to search titles already in your library</div>';
+      empty.classList.add('hidden');
+      return;
+    }
+    items = items.filter(i => (i.title || '').toLowerCase().includes(pQuery));
+  } else {
+    if (pFilter !== 'all') items = items.filter(i => i.watchStatus === pFilter);
+    if (pType !== 'all') items = items.filter(i => i.mediaType === pType);
+    if (pQuery) items = items.filter(i => (i.title || '').toLowerCase().includes(pQuery));
+  }
 
   const typePri = (i) => i.mediaType === 'tv' ? 0 : 1;
   switch (pSort) {
@@ -567,8 +686,6 @@ function renderList() {
     default: items.sort((a, b) => new Date(b.dateUpdated || b.dateAdded) - new Date(a.dateUpdated || a.dateAdded) || typePri(a) - typePri(b));
   }
 
-  const el = document.getElementById('pList');
-  const empty = document.getElementById('pEmpty');
   if (!items.length) { el.innerHTML = ''; empty.classList.remove('hidden'); return; }
   empty.classList.add('hidden');
 
@@ -598,7 +715,7 @@ function renderList() {
   }
 
   el.querySelectorAll('[data-tmdb]').forEach(c => c.addEventListener('click', () => {
-    showDetail(parseInt(c.dataset.tmdb), c.dataset.type);
+    showDetail(parseInt(c.dataset.tmdb), c.dataset.type, pMode === 'list-search' ? 'list-search' : 'list');
   }));
 }
 
@@ -701,12 +818,13 @@ function bindDetailStatusDD(idPrefix, tmdbId, mediaType, title, posterPath) {
 
 async function showDetail(tmdbId, mediaType, returnMode = 'list') {
   pMode = 'detail';
+  setPopupModeTabs('hidden');
   pReturnMode = returnMode || 'list';
   document.getElementById('pBack').classList.remove('hidden');
   document.getElementById('pControls').classList.add('hidden');
-  document.getElementById('pTmdbBar').classList.add('hidden');
-  document.getElementById('pAddNew').classList.add('hidden');
-  document.getElementById('pSearch').parentElement.classList.add('hidden');
+  hidePopupSearchPage();
+  document.getElementById('pAddNew')?.classList.add('hidden');
+  document.getElementById('pSearchBtn').classList.add('hidden');
   document.getElementById('pDiaryBtn').classList.add('hidden');
   document.getElementById('pRecBtn').classList.add('hidden');
   document.getElementById('pEmpty').classList.add('hidden');
@@ -1055,70 +1173,330 @@ async function showDetail(tmdbId, mediaType, returnMode = 'list') {
    TMDB SEARCH
    ═══════════════════════════════════════════ */
 
+
+async function popupAddTmdbToList(tmdbId, mediaType) {
+  const isM = mediaType === 'movie';
+  const now = new Date().toISOString();
+  if (isM) {
+    const d = await TMDB.movieDetails(tmdbId);
+    Store.addMovie({
+      tmdbId: d.id,
+      mediaKind: 'movie',
+      granularity: 'movie',
+      externalIds: [{ provider: 'tmdb', providerType: 'movie', id: d.id, relation: 'same_as' }],
+      title: d.title,
+      posterPath: d.poster_path,
+      backdropPath: d.backdrop_path,
+      year: parseInt((d.release_date || '').substring(0, 4)) || 0,
+      voteAverage: d.vote_average || 0,
+      imdbId: d.imdb_id || '',
+      runtime: d.runtime || 0,
+      genres: (d.genres || []).map(g => g.name),
+      watchStatus: 'plan_to_watch',
+      rewatchCount: 0,
+      rewatchHistory: [],
+      startDate: '',
+      endDate: '',
+      dateAdded: now,
+      dateUpdated: now,
+      sourceTag: 'tmdb',
+    });
+    Store.addActivity({ tmdbId: d.id, title: d.title, type: 'movie', posterPath: d.poster_path, action: 'added', detail: 'Added from popup', timestamp: now });
+    return d;
+  }
+  const d = await TMDB.tvDetails(tmdbId);
+  const ss = (d.seasons || []).filter(season => season.season_number > 0);
+  Store.addTvShow({
+    tmdbId: d.id,
+    mediaKind: 'tv',
+    granularity: 'series',
+    externalIds: [{ provider: 'tmdb', providerType: 'tv', id: d.id, relation: 'same_as' }],
+    title: d.name,
+    posterPath: d.poster_path,
+    backdropPath: d.backdrop_path,
+    year: parseInt((d.first_air_date || '').substring(0, 4)) || 0,
+    voteAverage: d.vote_average || 0,
+    imdbId: d.external_ids?.imdb_id || '',
+    totalSeasons: d.number_of_seasons || 0,
+    totalEpisodes: d.number_of_episodes || 0,
+    genres: (d.genres || []).map(g => g.name),
+    watchStatus: 'plan_to_watch',
+    rewatchCount: 0,
+    rewatchHistory: [],
+    startDate: '',
+    endDate: '',
+    seasons: ss.map(season => ({ seasonNumber: season.season_number, episodeCount: season.episode_count || 0, episodesWatched: 0, posterPath: season.poster_path })),
+    dateAdded: now,
+    dateUpdated: now,
+    sourceTag: 'tmdb',
+  });
+  Store.addActivity({ tmdbId: d.id, title: d.name, type: 'tv', posterPath: d.poster_path, action: 'added', detail: 'Added from popup', timestamp: now });
+  return d;
+}
+
 async function searchTMDB(query) {
+  pLastSearchQuery = (query || '').trim();
   const el = document.getElementById('pList');
-  el.innerHTML = '<div class="p-search-msg">Searching TMDB...</div>';
+  el.innerHTML = '<div class="p-search-msg">Searching TMDB + MAL...</div>';
 
   try {
-    const results = await TMDB.search(query);
-    if (!results.length) { el.innerHTML = '<div class="p-search-msg">No results found</div>'; return; }
-    results.sort((a, b) => (a.media_type === 'tv' ? 0 : 1) - (b.media_type === 'tv' ? 0 : 1));
+    const [tmdbRes, malRes] = await Promise.allSettled([
+      TMDB.getKey() ? TMDB.search(query) : Promise.resolve([]),
+      searchMALAnime(query),
+    ]);
+    const tmdbResults = tmdbRes.status === 'fulfilled' ? tmdbRes.value : [];
+    const malResults = malRes.status === 'fulfilled' ? malRes.value : [];
 
-    el.innerHTML = results.slice(0, 12).map(r => {
+    const rows = [];
+    tmdbResults.forEach(r => rows.push({ source: 'tmdb', data: r }));
+    malResults.forEach(r => rows.push({ source: 'mal', data: r }));
+
+    if (!rows.length) {
+      const tmdbErr = tmdbRes.status === 'rejected' ? tmdbRes.reason?.message : '';
+      const malErr = malRes.status === 'rejected' ? malRes.reason?.message : '';
+      const errText = [tmdbErr, malErr].filter(Boolean).join(' · ');
+      el.innerHTML = `<div class="p-search-msg">No results found${errText ? ` (${esc(errText)})` : ''}</div>`;
+      return;
+    }
+
+    // Keep TMDB and MAL identities separate, but interleave them so the popup shows
+    // both the TMDB live-action/adaptation rows and the MAL anime rows immediately.
+    const tmdbRows = rows.filter(r => r.source === 'tmdb');
+    const malRows = rows.filter(r => r.source === 'mal');
+    const blendedRows = [];
+    const maxRows = Math.max(tmdbRows.length, malRows.length);
+    for (let i = 0; i < maxRows; i += 1) {
+      if (tmdbRows[i]) blendedRows.push(tmdbRows[i]);
+      if (malRows[i]) blendedRows.push(malRows[i]);
+    }
+
+    el.innerHTML = blendedRows.slice(0, 18).map(row => {
+      if (row.source === 'mal') {
+        const r = row.data;
+        const malId = Number(r.mal_id);
+        const isMovie = popupIsMalMovie(r);
+        const title = popupMalTitle(r);
+        const yr = popupMalYear(r) || '';
+        const poster = popupMalPoster(r);
+        const score = r.score ? ` · ${Number(r.score).toFixed(1)}` : '';
+        const eps = !isMovie && r.episodes ? ` · ${r.episodes} eps` : '';
+        const inList = isMovie ? Store.getMovies().some(m => Number(m.malId) === malId) : Store.hasTvShowByMalId(malId);
+        return `<div class="p-search-item" data-source="mal" data-mal-id="${malId}">
+          <div class="p-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">MAL</div>`}</div>
+          <div class="p-search-info"><div class="p-search-title">${esc(title)}</div>
+            <div class="p-search-sub">MAL Anime · ${esc(r.type || (isMovie ? 'Movie' : 'TV'))}${yr ? ` · ${yr}` : ''}${score}${eps}</div></div>
+          <span class="p-search-type p-search-type-${isMovie ? 'movie' : 'tv'}">MAL</span>
+          <div class="p-search-actions">
+            ${inList ? `<button class="p-add-btn added" disabled>In List</button>` : `<button class="p-add-btn" data-action="add">+ Add</button>`}
+          </div>
+        </div>`;
+      }
+
+      const r = row.data;
       const isM = r.media_type === 'movie';
       const title = isM ? r.title : r.name;
       const yr = ((isM ? r.release_date : r.first_air_date) || '').substring(0, 4);
       const poster = TMDB.poster(r.poster_path, 'w92');
       const inList = isM ? Store.hasMovie(r.id) : Store.hasTvShow(r.id);
-      return `<div class="p-search-item" data-id="${r.id}" data-type="${r.media_type}">
+      return `<div class="p-search-item" data-source="tmdb" data-id="${r.id}" data-type="${r.media_type}">
         <div class="p-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">${isM ? 'MOV' : 'TV'}</div>`}</div>
         <div class="p-search-info"><div class="p-search-title">${esc(title)}</div>
-          <div class="p-search-sub">${yr}${r.vote_average ? ` · ${r.vote_average.toFixed(1)}` : ''}</div></div>
+          <div class="p-search-sub">TMDB · ${yr}${r.vote_average ? ` · ${r.vote_average.toFixed(1)}` : ''}</div></div>
         <span class="p-search-type p-search-type-${isM ? 'movie' : 'tv'}">${isM ? 'Movie' : 'TV'}</span>
-        ${inList ? `<button class="p-add-btn added" disabled>Added</button>` : `<button class="p-add-btn" data-action="add">+ Add</button>`}
+        <div class="p-search-actions">
+          ${inList ? `<button class="p-add-btn added" disabled>In List</button>` : `<button class="p-add-btn" data-action="add">+ Add</button>`}
+        </div>
       </div>`;
     }).join('');
 
     el.querySelectorAll('.p-search-item').forEach(item => {
+      const source = item.dataset.source;
+      const openDetails = () => {
+        if (source === 'mal') showMALDetail(parseInt(item.dataset.malId), 'search');
+        else showTMDBDetail(parseInt(item.dataset.id), item.dataset.type, 'search');
+      };
       const addBtn = item.querySelector('[data-action="add"]');
       if (addBtn) {
         addBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          const id = parseInt(item.dataset.id), type = item.dataset.type;
           addBtn.textContent = '...'; addBtn.disabled = true;
           try {
-            if (type === 'movie') {
-              const d = await TMDB.movieDetails(id);
-              Store.addMovie({ tmdbId: d.id, title: d.title, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.release_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, imdbRating: rec?.imdbRating || 0, imdbVotes: rec?.imdbVotes || 0, imdbId: rec?.imdbId || d.imdb_id || '', runtime: d.runtime || 0, genres: (d.genres || []).map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
-              Store.addActivity({ tmdbId: d.id, title: d.title, type: 'movie', posterPath: d.poster_path, action: 'added', detail: 'Added from popup', timestamp: new Date().toISOString() });
-            } else {
-              const d = await TMDB.tvDetails(id);
-              const ss = (d.seasons || []).filter(s => s.season_number > 0);
-              Store.addTvShow({ tmdbId: d.id, title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.first_air_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, imdbRating: rec?.imdbRating || 0, imdbVotes: rec?.imdbVotes || 0, imdbId: rec?.imdbId || d.external_ids?.imdb_id || '', totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: (d.genres || []).map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', seasons: ss.map(s => ({ seasonNumber: s.season_number, episodeCount: s.episode_count || 0, episodesWatched: 0, posterPath: s.poster_path })), dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
-              Store.addActivity({ tmdbId: d.id, title: d.name, type: 'tv', posterPath: d.poster_path, action: 'added', detail: 'Added from popup', timestamp: new Date().toISOString() });
-            }
-            addBtn.textContent = 'Added'; addBtn.classList.add('added');
-          } catch (err) { addBtn.textContent = 'Error'; setTimeout(() => { addBtn.textContent = '+ Add'; addBtn.disabled = false; }, 1500); }
+            if (source === 'mal') await popupAddMalToList(parseInt(item.dataset.malId));
+            else await popupAddTmdbToList(parseInt(item.dataset.id), item.dataset.type);
+            addBtn.textContent = 'In List'; addBtn.classList.add('added');
+          } catch (err) {
+            addBtn.textContent = 'Error';
+            setTimeout(() => { addBtn.textContent = '+ Add'; addBtn.disabled = false; }, 1500);
+          }
         });
       }
       item.addEventListener('click', (e) => {
-        if (e.target.closest('[data-action="add"]') || e.target.closest('.p-add-btn')) return;
-        showTMDBDetail(parseInt(item.dataset.id), item.dataset.type);
+        if (e.target.closest('button')) return;
+        openDetails();
       });
     });
   } catch (err) {
-    el.innerHTML = `<div class="p-search-msg" style="color:var(--pdropped)">Error: ${err.message}</div>`;
+    el.innerHTML = `<div class="p-search-msg" style="color:var(--pdropped)">Error: ${esc(err.message)}</div>`;
+  }
+}
+
+async function searchMALAnime(query) {
+  if (!query || query.trim().length < 2) return [];
+  const url = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query.trim())}&limit=10&sfw=true&order_by=popularity&sort=asc`;
+  const res = await popupBgFetch(url);
+  if (!res.ok) throw new Error(`MAL/Jikan ${res.status}`);
+  const data = res.body || {};
+  return (data.data || []).filter(a => a && a.mal_id).slice(0, 10);
+}
+
+async function fetchMALAnimeFull(malId) {
+  const res = await popupBgFetch(`https://api.jikan.moe/v4/anime/${malId}/full`);
+  if (!res.ok) throw new Error(`MAL/Jikan ${res.status}`);
+  return res.body?.data;
+}
+
+async function popupAddMalToList(malId) {
+  const anime = await fetchMALAnimeFull(malId);
+  if (!anime) throw new Error('MAL anime not found');
+  const isMovie = popupIsMalMovie(anime);
+  const now = new Date().toISOString();
+  const title = popupMalTitle(anime);
+  const poster = popupMalPoster(anime);
+  const year = popupMalYear(anime);
+  const score = anime.score || 0;
+  const genres = (anime.genres || []).map(g => g.name).filter(Boolean);
+  const common = {
+    tmdbId: -Math.abs(Number(malId)),
+    malId: Number(malId),
+    mediaKind: 'anime',
+    granularity: isMovie ? 'movie' : 'mal_entry',
+    externalIds: [{ provider: 'mal', providerType: 'anime', id: Number(malId), relation: 'primary' }],
+    title,
+    posterPath: poster,
+    backdropPath: anime.trailer?.images?.maximum_image_url || anime.trailer?.images?.large_image_url || null,
+    year,
+    voteAverage: score,
+    genres,
+    watchStatus: 'plan_to_watch',
+    rewatchCount: 0,
+    rewatchHistory: [],
+    startDate: '',
+    endDate: '',
+    dateAdded: now,
+    dateUpdated: now,
+    sourceTag: 'anime',
+    syncSource: 'mal-search',
+  };
+
+  if (isMovie) {
+    const runtimeMin = anime.duration ? (parseInt(String(anime.duration).match(/\d+/)?.[0] || '0') || 0) : 0;
+    Store.addMovie({ ...common, runtime: runtimeMin });
+    Store.addActivity({ tmdbId: common.tmdbId, malId: Number(malId), title, type: 'movie', posterPath: poster, action: 'added', detail: 'Added from MAL search', timestamp: now });
+    return { type: 'movie', tmdbId: common.tmdbId, anime };
+  }
+
+  const eps = Number(anime.episodes) || 0;
+  Store.addTvShow({
+    ...common,
+    totalSeasons: 1,
+    totalEpisodes: eps,
+    seasons: [{ seasonNumber: 1, episodeCount: eps, episodesWatched: 0, posterPath: poster }],
+  });
+  Store.addActivity({ tmdbId: common.tmdbId, malId: Number(malId), title, type: 'tv', posterPath: poster, action: 'added', detail: 'Added from MAL search', timestamp: now });
+  return { type: 'tv', tmdbId: common.tmdbId, anime };
+}
+
+async function showMALDetail(malId, returnMode = 'search') {
+  pMode = 'detail';
+  setPopupModeTabs('hidden');
+  pReturnMode = returnMode || 'search';
+  document.getElementById('pBack').classList.remove('hidden');
+  document.getElementById('pControls').classList.add('hidden');
+  hidePopupSearchPage();
+  document.getElementById('pAddNew')?.classList.add('hidden');
+  document.getElementById('pSearchBtn').classList.add('hidden');
+  document.getElementById('pDiaryBtn').classList.add('hidden');
+  document.getElementById('pRecBtn').classList.add('hidden');
+  const el = document.getElementById('pList');
+  el.innerHTML = '<div class="p-search-msg">Loading MAL details...</div>';
+
+  try {
+    const anime = await fetchMALAnimeFull(malId);
+    if (!anime) throw new Error('MAL anime not found');
+    const isMovie = popupIsMalMovie(anime);
+    const title = popupMalTitle(anime);
+    const year = popupMalYear(anime);
+    const poster = popupMalPoster(anime);
+    const score = anime.score ? Number(anime.score).toFixed(1) : '—';
+    const genres = (anime.genres || []).slice(0, 4);
+    const eps = anime.episodes ? `${anime.episodes} Eps` : '';
+    const subInfo = [anime.type || (isMovie ? 'Movie' : 'TV'), year || '', eps, anime.status || ''].filter(Boolean).join(' · ');
+    const overview = (anime.synopsis || '').substring(0, 320) + ((anime.synopsis || '').length > 320 ? '...' : '');
+    const inList = isMovie ? Store.getMovies().some(m => Number(m.malId) === Number(malId)) : Store.hasTvShowByMalId(Number(malId));
+
+    let relatedHtml = '';
+    const validRelTypes = ['Prequel', 'Sequel', 'Parent Story', 'Side Story', 'Spin-off', 'Alternative Version'];
+    const rels = [];
+    for (const rel of (anime.relations || [])) {
+      if (!validRelTypes.includes(rel.relation)) continue;
+      for (const entry of (rel.entry || [])) {
+        if (entry.type !== 'anime') continue;
+        rels.push({ malId: entry.mal_id, title: entry.name || '', relation: rel.relation });
+      }
+    }
+    if (rels.length) {
+      relatedHtml = `<div class="pd-section"><div class="pd-section-label">Related MAL Entries</div><div class="pd-related-list">${rels.slice(0, 8).map(r => `<div class="pd-related-card" data-rel-mal="${r.malId}"><span class="pd-related-type">${esc(r.relation)}</span><span class="pd-related-title">${esc(r.title)}</span></div>`).join('')}</div></div>`;
+    }
+
+    el.innerHTML = `<div class="pd-wrap">
+      <div class="pd-hero">
+        <div class="pd-poster">${poster ? `<img src="${poster}">` : `<div class="pd-poster-ph">MAL</div>`}</div>
+        <div class="pd-info">
+          <div class="pd-title">${esc(title)}</div>
+          <div class="pd-sub">MAL Anime · ${esc(subInfo)}</div>
+          <div class="pd-genres">${genres.map(g => `<span class="pd-genre-tag">${esc(g.name)}</span>`).join('')}</div>
+          <div class="pd-stats"><div><div class="pd-stat-val gold">${score}</div><div class="pd-stat-label">MAL</div></div>${anime.rank ? `<div><div class="pd-stat-val">#${anime.rank}</div><div class="pd-stat-label">Rank</div></div>` : ''}</div>
+        </div>
+      </div>
+      ${overview ? `<div class="pd-overview">${esc(overview)}</div>` : ''}
+      ${relatedHtml}
+      ${renderPopupQuickLinks(title)}
+      <div class="pd-actions">
+        <button class="pd-btn pd-btn-open" id="pdOpenFull">Full Details</button>
+        ${inList ? '' : `<button class="pd-btn pd-btn-add" id="pdAddMal">+ Add to List</button>`}
+      </div>
+      <div class="pd-links"><a href="https://myanimelist.net/anime/${malId}" target="_blank">↗ MAL</a></div>
+    </div>`;
+
+    bindPopupQuickLinks(el);
+    el.querySelector('#pdOpenFull')?.addEventListener('click', () => {
+      chrome.tabs.create({ url: `https://myanimelist.net/anime/${malId}` });
+    });
+    el.querySelectorAll('[data-rel-mal]').forEach(card => card.addEventListener('click', () => showMALDetail(parseInt(card.dataset.relMal), 'search')));
+
+    if (!inList) {
+      el.querySelector('#pdAddMal')?.addEventListener('click', async () => {
+        const btn = el.querySelector('#pdAddMal'); btn.textContent = 'Adding...'; btn.disabled = true;
+        try {
+          const added = await popupAddMalToList(Number(malId));
+          showDetail(added.tmdbId, added.type, pReturnMode);
+        } catch (err) { btn.textContent = 'Error'; }
+      });
+    }
+  } catch (err) {
+    el.innerHTML = `<div class="p-search-msg" style="color:var(--pdropped)">Failed: ${esc(err.message)}</div>`;
   }
 }
 
 async function showTMDBDetail(tmdbId, mediaType, returnMode = 'list') {
   pMode = 'detail';
+  setPopupModeTabs('hidden');
   pReturnMode = returnMode || 'list';
   document.getElementById('pBack').classList.remove('hidden');
   document.getElementById('pControls').classList.add('hidden');
-  document.getElementById('pTmdbBar').classList.add('hidden');
-  document.getElementById('pAddNew').classList.add('hidden');
-  document.getElementById('pSearch').parentElement.classList.add('hidden');
+  hidePopupSearchPage();
+  document.getElementById('pAddNew')?.classList.add('hidden');
+  document.getElementById('pSearchBtn').classList.add('hidden');
   document.getElementById('pDiaryBtn').classList.add('hidden');
   document.getElementById('pRecBtn').classList.add('hidden');
   const el = document.getElementById('pList');
@@ -1162,8 +1540,8 @@ async function showTMDBDetail(tmdbId, mediaType, returnMode = 'list') {
       ${castHtml}
       ${renderPopupQuickLinks(title)}
       <div class="pd-actions">
-        ${inList ? `<button class="pd-btn pd-btn-open" id="pdOpenFull">View in Dashboard</button>`
-        : `<button class="pd-btn pd-btn-add" id="pdAdd">+ Add to List</button>`}
+        <button class="pd-btn pd-btn-open" id="pdOpenFull">Full Details</button>
+        ${inList ? '' : `<button class="pd-btn pd-btn-add" id="pdAdd">+ Add to List</button>`}
       </div>
       <div class="pd-links">
         <a href="https://www.themoviedb.org/${isM ? 'movie' : 'tv'}/${d.id}" target="_blank">&#8599; TMDB</a>
@@ -1174,19 +1552,17 @@ async function showTMDBDetail(tmdbId, mediaType, returnMode = 'list') {
 
     bindPopupQuickLinks(el);
 
+    el.querySelector('#pdOpenFull')?.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('app.html') + `#detail-${mediaType}-${tmdbId}` }); window.close();
+    });
+
     if (!inList) {
       el.querySelector('#pdAdd').addEventListener('click', async () => {
         const btn = el.querySelector('#pdAdd'); btn.textContent = 'Adding...'; btn.disabled = true;
         try {
-          if (isM) Store.addMovie({ tmdbId: d.id, title: d.title, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt(year) || 0, voteAverage: d.vote_average || 0, runtime: d.runtime || 0, genres: genres.map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
-          else { const ss = (d.seasons || []).filter(s => s.season_number > 0); Store.addTvShow({ tmdbId: d.id, title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt(year) || 0, voteAverage: d.vote_average || 0, totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: genres.map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', seasons: ss.map(s => ({ seasonNumber: s.season_number, episodeCount: s.episode_count || 0, episodesWatched: 0, posterPath: s.poster_path })), dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() }); }
-          Store.addActivity({ tmdbId: d.id, title, type: mediaType, posterPath: d.poster_path, action: 'added', detail: 'Added from popup', timestamp: new Date().toISOString() });
+          await popupAddTmdbToList(d.id, mediaType);
           showDetail(d.id, mediaType, pReturnMode);
         } catch (err) { btn.textContent = 'Error'; }
-      });
-    } else {
-      el.querySelector('#pdOpenFull').addEventListener('click', () => {
-        chrome.tabs.create({ url: chrome.runtime.getURL('app.html') + `#detail-${mediaType}-${tmdbId}` }); window.close();
       });
     }
   } catch (err) {

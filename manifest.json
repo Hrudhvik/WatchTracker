@@ -18,8 +18,7 @@
     "https://api.themoviedb.org/*",
     "https://boxd.it/*",
     "https://myanimelist.net/*",
-    "https://raw.githubusercontent.com/*",
-    "https://www.omdbapi.com/*"
+    "https://raw.githubusercontent.com/*"
   ],
   "background": {
     "service_worker": "background.js"

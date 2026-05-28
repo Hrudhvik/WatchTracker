@@ -82,30 +82,131 @@ const Recommendations = {
     return items;
   },
 
+  // Convert user's watch history into a richer positive/negative taste profile.
+  // This is still local-first and explainable, but it captures much more than genre.
   buildTasteProfile(items) {
-    const genreScores = new Map();
-    const decadeScores = new Map();
-    const languageScores = new Map();
+    const makeBucket = () => ({
+      genres: new Map(),
+      keywords: new Map(),
+      directors: new Map(),
+      writers: new Map(),
+      actors: new Map(),
+      countries: new Map(),
+      languages: new Map(),
+      decades: new Map(),
+      runtimeBuckets: new Map(),
+      moods: new Map(),
+    });
+    const profile = {
+      positive: makeBucket(),
+      negative: makeBucket(),
+      topGenres: [],
+      topDecades: [],
+      topLanguages: [],
+      avgRuntime: null,
+      tasteCount: items.length,
+      ratingCount: 0,
+      avgPersonalRating: null,
+    };
     const runtimeVals = [];
+    const ratings = [];
 
     items.forEach(item => {
       const personal = this.getAvgPersonalRating(item.tmdbId, item.mediaType);
-      const weight = personal ? Math.max(1, personal / 2) : 1;
-      (item.genres || []).forEach(g => genreScores.set(g, (genreScores.get(g) || 0) + weight));
-      if (item.year) {
-        const decade = Math.floor(item.year / 10) * 10;
-        decadeScores.set(decade, (decadeScores.get(decade) || 0) + weight);
-      }
-      if (item.originalLanguage) languageScores.set(item.originalLanguage, (languageScores.get(item.originalLanguage) || 0) + weight);
+      if (personal) ratings.push(Number(personal));
+      const signedWeight = this.preferenceWeight(personal, item);
+      const target = signedWeight < 0 ? profile.negative : profile.positive;
+      const weight = Math.abs(signedWeight);
+      this.addFeaturesToBucket(target, this.extractItemFeatures(item), weight);
       if (item.runtime) runtimeVals.push(Number(item.runtime));
     });
 
-    const topGenres = [...genreScores.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([g]) => g);
-    const topDecades = [...decadeScores.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([d]) => d);
-    const topLanguages = [...languageScores.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([l]) => l);
-    const avgRuntime = runtimeVals.length ? Math.round(runtimeVals.reduce((a, b) => a + b, 0) / runtimeVals.length) : null;
+    profile.topGenres = this.topKeys(profile.positive.genres, 5);
+    profile.topDecades = this.topKeys(profile.positive.decades, 3).map(Number);
+    profile.topLanguages = this.topKeys(profile.positive.languages, 3);
+    profile.avgRuntime = runtimeVals.length ? Math.round(runtimeVals.reduce((a, b) => a + b, 0) / runtimeVals.length) : null;
+    profile.ratingCount = ratings.length;
+    profile.avgPersonalRating = ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : null;
+    return profile;
+  },
 
-    return { topGenres, topDecades, topLanguages, avgRuntime, tasteCount: items.length };
+  preferenceWeight(personal, item = {}) {
+    const rating = Number(personal || 0);
+    let weight = 1;
+    if (rating >= 9) weight = 3;
+    else if (rating >= 8) weight = 2.25;
+    else if (rating >= 7) weight = 1.35;
+    else if (rating > 0 && rating <= 3) weight = -3;
+    else if (rating > 0 && rating <= 5) weight = -1.75;
+    else if (rating > 0 && rating < 7) weight = 0.35;
+
+    if (item.watchStatus === 'completed') weight *= 1.15;
+    const date = item.dateWatched || item.dateUpdated || item.dateAdded || item.timestamp;
+    const recency = this.recencyBoost(date);
+    return weight * recency;
+  },
+
+  recencyBoost(dateValue) {
+    if (!dateValue) return 1;
+    const t = new Date(dateValue).getTime();
+    if (!Number.isFinite(t)) return 1;
+    const ageDays = Math.max(0, (Date.now() - t) / 86400000);
+    if (ageDays < 90) return 1.25;
+    if (ageDays < 365) return 1.1;
+    if (ageDays > 3650) return 0.75;
+    return 1;
+  },
+
+  runtimeBucket(runtime) {
+    const n = Number(runtime || 0);
+    if (!n) return '';
+    if (n < 80) return 'short';
+    if (n < 105) return 'standard';
+    if (n < 135) return 'long';
+    return 'epic';
+  },
+
+  addWeighted(map, key, weight = 1) {
+    if (key === undefined || key === null || key === '') return;
+    const clean = String(key).trim();
+    if (!clean) return;
+    map.set(clean, (map.get(clean) || 0) + Number(weight || 0));
+  },
+
+  topKeys(map, n = 10) {
+    return [...(map || new Map()).entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k]) => k);
+  },
+
+  extractItemFeatures(item = {}) {
+    const year = Number(item.year || 0);
+    const decade = year ? Math.floor(year / 10) * 10 : '';
+    const runtime = item.runtime || item.episodeRunTime || item.episode_run_time;
+    const toList = (...values) => values.flatMap(v => {
+      if (!v) return [];
+      if (Array.isArray(v)) return v;
+      if (typeof v === 'string') return v.split(/[|,]/).map(x => x.trim()).filter(Boolean);
+      return [];
+    });
+    return {
+      genres: toList(item.genres),
+      keywords: toList(item.keywords, item.keywordNames, item.tags).map(k => String(k).toLowerCase()),
+      directors: toList(item.directors, item.director),
+      writers: toList(item.writers, item.writer),
+      actors: toList(item.actors, item.cast).slice(0, 8),
+      countries: toList(item.countries, item.productionCountries, item.originCountry, item.origin_country),
+      languages: toList(item.originalLanguage || item.original_language || item.language).map(l => this.normalizeLanguage(l)),
+      decades: decade ? [decade] : [],
+      runtimeBuckets: runtime ? [this.runtimeBucket(Array.isArray(runtime) ? runtime[0] : runtime)] : [],
+      moods: toList(item.mood, item.moods),
+    };
+  },
+
+  addFeaturesToBucket(bucket, features, weight = 1) {
+    Object.entries(features || {}).forEach(([name, values]) => {
+      const map = bucket[name];
+      if (!map || !Array.isArray(values)) return;
+      values.forEach(v => this.addWeighted(map, v, weight));
+    });
   },
 
   trackedKeySet(libraryMode = 'new_only') {
@@ -156,6 +257,7 @@ const Recommendations = {
 
     const tasteItems = this.getTasteItems(filters.minMyRating);
     const profile = this.buildTasteProfile(tasteItems.length ? tasteItems : this.getAllItems());
+    await this.enrichTasteProfile(profile, tasteItems.length ? tasteItems : this.getAllItems());
 
     const candidates = [];
     if (filters.style === 'random') {
@@ -169,6 +271,7 @@ const Recommendations = {
       }
     } else {
       candidates.push(...await this.fetchDiscover(profile, filters));
+      candidates.push(...await this.fetchTasteSignalCandidates(profile, filters));
     }
 
     const tracked = this.trackedKeySet(filters.libraryMode);
@@ -183,7 +286,7 @@ const Recommendations = {
         .filter(c => this.passesCandidateFilters(c, filters));
     }
 
-    deduped = await this.enrichWithOmdb(deduped, filters, profile);
+    deduped = await this.enrichCandidateMetadata(deduped, filters, profile);
     const preFilterContext = this.buildScoreContext(deduped);
     deduped = this.applyVoteConfidenceFilter(deduped, filters, preFilterContext);
     // Avoid the previous behavior where each click returned the same top titles in a shuffled order.
@@ -351,6 +454,161 @@ const Recommendations = {
     return out;
   },
 
+  async readMetadataCache() {
+    if (this._metadataCache) return this._metadataCache;
+    this._metadataCache = await new Promise(resolve => {
+      try {
+        chrome.storage.local.get(['wtRecommendationMetadataCache'], d => resolve(d.wtRecommendationMetadataCache || {}));
+      } catch (_) { resolve({}); }
+    });
+    return this._metadataCache;
+  },
+
+  async writeMetadataCache() {
+    if (!this._metadataCache) return;
+    try { chrome.storage.local.set({ wtRecommendationMetadataCache: this._metadataCache }); } catch (_) {}
+  },
+
+  metadataKey(mediaType, tmdbId) {
+    return `${mediaType || 'movie'}:${Number(tmdbId || 0)}`;
+  },
+
+  isFreshMetadata(entry) {
+    const ttl = 1000 * 60 * 60 * 24 * 90;
+    return entry && entry.fetchedAt && (Date.now() - Number(entry.fetchedAt)) < ttl;
+  },
+
+  normalizeTmdbMetadata(details = {}, mediaType = 'movie') {
+    const credits = details.credits || {};
+    const crew = Array.isArray(credits.crew) ? credits.crew : [];
+    const cast = Array.isArray(credits.cast) ? credits.cast : [];
+    const keywordPayload = mediaType === 'movie' ? details.keywords?.keywords : details.keywords?.results;
+    const countries = details.production_countries || details.origin_country || [];
+    const episodeRunTime = Array.isArray(details.episode_run_time) ? details.episode_run_time[0] : 0;
+    return {
+      imdbId: details.imdb_id || details.external_ids?.imdb_id || '',
+      runtime: details.runtime || episodeRunTime || 0,
+      keywords: (keywordPayload || []).map(k => k.name).filter(Boolean),
+      directors: crew.filter(p => p.job === 'Director' || p.department === 'Directing').map(p => p.name).slice(0, 6),
+      writers: crew.filter(p => ['Writer', 'Screenplay', 'Story', 'Teleplay', 'Creator'].includes(p.job)).map(p => p.name).slice(0, 8),
+      actors: cast.map(p => p.name).filter(Boolean).slice(0, 10),
+      countries: Array.isArray(countries) ? countries.map(c => c.iso_3166_1 || c).filter(Boolean) : [],
+      productionCompanies: (details.production_companies || []).map(c => c.name).filter(Boolean).slice(0, 8),
+      fetchedAt: Date.now(),
+    };
+  },
+
+  async fetchMetadataFor(mediaType, tmdbId) {
+    if (!tmdbId || typeof TMDB === 'undefined') return null;
+    const cache = await this.readMetadataCache();
+    const key = this.metadataKey(mediaType, tmdbId);
+    if (this.isFreshMetadata(cache[key])) return cache[key];
+    try {
+      const details = mediaType === 'tv'
+        ? await TMDB.tvDetailsForRecommendation(tmdbId)
+        : await TMDB.movieDetailsForRecommendation(tmdbId);
+      const meta = this.normalizeTmdbMetadata(details, mediaType);
+      cache[key] = meta;
+      await this.writeMetadataCache();
+      return meta;
+    } catch (e) {
+      console.warn('Recommendation metadata fetch failed', mediaType, tmdbId, e);
+      return null;
+    }
+  },
+
+  mergeMetadata(item, meta) {
+    if (!meta) return item;
+    return {
+      ...item,
+      imdbId: item.imdbId || meta.imdbId || '',
+      runtime: item.runtime || meta.runtime || 0,
+      keywords: item.keywords?.length ? item.keywords : meta.keywords || [],
+      directors: item.directors?.length ? item.directors : meta.directors || [],
+      writers: item.writers?.length ? item.writers : meta.writers || [],
+      actors: item.actors?.length ? item.actors : meta.actors || [],
+      countries: item.countries?.length ? item.countries : meta.countries || [],
+      productionCompanies: item.productionCompanies?.length ? item.productionCompanies : meta.productionCompanies || [],
+    };
+  },
+
+  async enrichTasteProfile(profile, tasteItems = []) {
+    const rated = [...tasteItems]
+      .filter(i => i.tmdbId > 0)
+      .sort((a, b) => (this.getAvgPersonalRating(b.tmdbId, b.mediaType) || 0) - (this.getAvgPersonalRating(a.tmdbId, a.mediaType) || 0))
+      .slice(0, 60);
+    for (const item of rated) {
+      const personal = this.getAvgPersonalRating(item.tmdbId, item.mediaType);
+      // Metadata fetches are most useful for strong likes/dislikes. Avoid spending quota on neutral items.
+      if (personal && personal > 5 && personal < 8) continue;
+      const meta = await this.fetchMetadataFor(item.mediaType, item.tmdbId);
+      if (!meta) continue;
+      const enriched = this.mergeMetadata(item, meta);
+      const signedWeight = this.preferenceWeight(personal, item);
+      const target = signedWeight < 0 ? profile.negative : profile.positive;
+      this.addFeaturesToBucket(target, this.extractItemFeatures(enriched), Math.abs(signedWeight) * 0.85);
+    }
+    profile.topGenres = this.topKeys(profile.positive.genres, 5);
+    profile.topDecades = this.topKeys(profile.positive.decades, 3).map(Number);
+    profile.topLanguages = this.topKeys(profile.positive.languages, 3);
+    return profile;
+  },
+
+  async enrichCandidateMetadata(candidates = [], filters = {}, profile = {}) {
+    const limit = filters.language ? 120 : 90;
+    const prioritized = [...candidates]
+      .map(c => ({ c, rough: this.roughCandidateScore(c, profile, filters) }))
+      .sort((a, b) => b.rough - a.rough)
+      .slice(0, limit)
+      .map(x => x.c);
+    const targetKeys = new Set(prioritized.map(c => this.candidateKey(c)));
+    const out = [];
+    for (const c of candidates) {
+      if (!targetKeys.has(this.candidateKey(c))) { out.push(c); continue; }
+      const meta = await this.fetchMetadataFor(c.mediaType, c.tmdbId);
+      out.push(this.mergeMetadata(c, meta));
+    }
+    return out;
+  },
+
+  roughCandidateScore(c, profile, filters) {
+    const genreOverlap = (c.genres || []).filter(g => profile?.topGenres?.includes(g)).length;
+    const lang = filters.language && c.originalLanguage === filters.language ? 4 : 0;
+    return (c.voteAverage || 0) + genreOverlap * 2.5 + Math.min(4, Math.log10((c.voteCount || 0) + 1)) + lang;
+  },
+
+  async fetchTasteSignalCandidates(profile, filters) {
+    if (filters.style === 'random') return [];
+    const out = [];
+    const types = filters.type === 'both' ? ['movie', 'tv'] : [filters.type];
+    const keywordNames = this.topKeys(profile.positive.keywords, 8);
+    const actorNames = this.topKeys(profile.positive.actors, 5);
+    const directorNames = this.topKeys(profile.positive.directors, 5);
+    // TMDB discover requires numeric ids for keywords/people. Search endpoints are not
+    // wrapped in tmdb.js, so this method currently uses stronger broad pools rather than
+    // brittle name-to-id guessing. The enriched ranker below does the real personalization.
+    for (const type of types) {
+      const language = filters.language || this.topKeys(profile.positive.languages, 1)[0] || '';
+      const countries = this.topKeys(profile.positive.countries, 3);
+      const genreIds = (filters.genre ? [filters.genre] : this.topKeys(profile.positive.genres, 4)).map(g => this.genreIdFor(type, g)).filter(Boolean);
+      const passes = [];
+      for (const gid of genreIds) passes.push({ with_genres: gid });
+      if (language) passes.push({ with_original_language: language });
+      for (const c of countries) passes.push({ with_origin_country: c });
+      for (const pass of passes.slice(0, 7)) {
+        for (const sort of ['popularity.desc', 'vote_average.desc']) {
+          try {
+            const params = { page: 1, sort_by: sort, 'vote_count.gte': filters.language ? 0 : 50, ...pass };
+            if (filters.minTmdbRating) params['vote_average.gte'] = filters.minTmdbRating;
+            const data = type === 'movie' ? await TMDB.discoverMovies(params) : await TMDB.discoverTv(params);
+            out.push(...(data.results || []).map(r => this.fromTmdbResult(r, type, profile, filters)));
+          } catch (e) { console.warn('Taste signal discovery failed', type, e); }
+        }
+      }
+    }
+    return out;
+  },
+
   async fetchBecauseYouLiked(tasteItems, filters) {
     const anchors = this.shuffle(tasteItems
       .filter(i => i.tmdbId > 0 && (filters.type === 'both' || i.mediaType === filters.type))
@@ -411,50 +669,13 @@ const Recommendations = {
     return true;
   },
 
-  async enrichWithOmdb(candidates, filters, profile) {
-    if (!window.OMDB || !OMDB.hasKey || !OMDB.hasKey()) return candidates;
-    const limit = filters.language ? 80 : 50;
-    const prioritized = [...candidates]
-      .map(c => ({
-        c,
-        rough: (c.voteAverage || 0) + ((c.genres || []).filter(g => profile?.topGenres?.includes(g)).length * 2) + Math.min(3, (c.voteCount || 0) / 1000)
-      }))
-      .sort((a, b) => b.rough - a.rough)
-      .slice(0, limit)
-      .map(x => x.c);
-    const targetKeys = new Set(prioritized.map(c => `${c.mediaType}:${c.tmdbId}`));
-    const enriched = [];
-    for (const c of candidates) {
-      if (!targetKeys.has(`${c.mediaType}:${c.tmdbId}`)) { enriched.push(c); continue; }
-      try {
-        const omdb = c.imdbId ? await OMDB.byImdbId(c.imdbId) : await OMDB.byTitle(c.title, c.year, c.mediaType);
-        enriched.push(omdb ? {
-          ...c,
-          imdbId: omdb.imdbId || c.imdbId || '',
-          imdbRating: Number(omdb.imdbRating || 0),
-          imdbVotes: Number(omdb.imdbVotes || 0),
-          overview: c.overview || omdb.omdbPlot || '',
-        } : c);
-      } catch (e) {
-        console.warn('OMDb enrich failed', c.title, e);
-        enriched.push(c);
-      }
-    }
-    return enriched;
-  },
-
   buildScoreContext(pool) {
     const tmdbVotes = pool.map(c => Number(c.voteCount || 0)).filter(v => v > 0);
-    const imdbVotes = pool.map(c => Number(c.imdbVotes || 0)).filter(v => v > 0);
     const tmdbRatings = pool.map(c => Number(c.voteAverage || 0)).filter(v => v > 0);
-    const imdbRatings = pool.map(c => Number(c.imdbRating || 0)).filter(v => v > 0);
     return {
       tmdbVoteP90: this.percentile(tmdbVotes.map(v => Math.log10(v + 1)), 0.9),
-      imdbVoteP90: this.percentile(imdbVotes.map(v => Math.log10(v + 1)), 0.9),
       tmdbVoteP60: this.percentile(tmdbVotes, 0.6) || 50,
-      imdbVoteP60: this.percentile(imdbVotes, 0.6) || 50,
       avgTmdbRating: tmdbRatings.length ? tmdbRatings.reduce((a,b)=>a+b,0)/tmdbRatings.length : 6.5,
-      avgImdbRating: imdbRatings.length ? imdbRatings.reduce((a,b)=>a+b,0)/imdbRatings.length : 6.5,
     };
   },
 
@@ -475,28 +696,24 @@ const Recommendations = {
     const style = filters.style || 'best';
 
     // TMDB vote counts are much lower for many regional-language catalogs, so the
-    // floor is language-aware. Still, avoid single-digit vote titles unless OMDb/IMDb
-    // provides a stronger confidence signal.
-    if (style === 'popular') return { tmdb: lang ? 50 : 500, imdb: lang ? 250 : 1500 };
-    if (style === 'hidden') return { tmdb: lang ? 15 : 50, imdb: lang ? 100 : 300 };
-    if (style === 'random') return { tmdb: lang ? 15 : 75, imdb: lang ? 100 : 400 };
-    if (style === 'wild') return { tmdb: lang ? 15 : 75, imdb: lang ? 100 : 350 };
-    return { tmdb: lang ? 20 : 100, imdb: lang ? 125 : 500 };
+    // confidence floor is language-aware while still blocking one-digit-vote titles.
+    if (style === 'popular') return { tmdb: lang ? 50 : 500 };
+    if (style === 'hidden') return { tmdb: lang ? 15 : 50 };
+    if (style === 'random') return { tmdb: lang ? 15 : 75 };
+    if (style === 'wild') return { tmdb: lang ? 15 : 75 };
+    return { tmdb: lang ? 20 : 100 };
   },
 
   hasBareVoteSignal(c) {
     const tmdbVotes = Number(c.voteCount || 0);
-    const imdbVotes = Number(c.imdbVotes || 0);
-    // This specifically prevents one-digit TMDB vote titles from floating into the
-    // final picks unless IMDb has enough votes to back them up.
-    return tmdbVotes >= 10 || imdbVotes >= 75;
+    // Prevent one-digit TMDB vote titles from floating into final recommendations.
+    return tmdbVotes >= 10;
   },
 
   hasEnoughVoteConfidence(c, filters = {}) {
     const min = this.voteMinimums(filters);
     const tmdbVotes = Number(c.voteCount || 0);
-    const imdbVotes = Number(c.imdbVotes || 0);
-    return tmdbVotes >= min.tmdb || imdbVotes >= min.imdb;
+    return tmdbVotes >= min.tmdb;
   },
 
   applyVoteConfidenceFilter(pool, filters = {}, ctx = null) {
@@ -515,8 +732,6 @@ const Recommendations = {
   },
 
   lowVotePenalty(c, filters = {}) {
-    const tmdbVotes = Number(c.voteCount || 0);
-    const imdbVotes = Number(c.imdbVotes || 0);
     if (!this.hasBareVoteSignal(c)) return 60;
     if (!this.hasEnoughVoteConfidence(c, filters)) return filters.language ? 10 : 16;
     return 0;
@@ -533,37 +748,66 @@ const Recommendations = {
 
   qualityScore(c, ctx) {
     const tmdbBayes = this.bayesianRating(c.voteAverage, c.voteCount, ctx.avgTmdbRating, ctx.tmdbVoteP60);
-    const imdbBayes = this.bayesianRating(c.imdbRating, c.imdbVotes, ctx.avgImdbRating, ctx.imdbVoteP60);
-    if (imdbBayes && tmdbBayes) return (imdbBayes * 0.6) + (tmdbBayes * 0.4);
-    return imdbBayes || tmdbBayes || Number(c.voteAverage || 0);
+    return tmdbBayes || Number(c.voteAverage || 0);
+  },
+
+  bucketAffinity(values = [], map = new Map(), cap = 1) {
+    if (!Array.isArray(values) || !values.length || !map || !map.size) return 0;
+    const total = [...map.values()].reduce((a, b) => a + Math.max(0, Number(b || 0)), 0) || 1;
+    const hit = values.reduce((sum, v) => sum + Math.max(0, Number(map.get(String(v)) || 0)), 0);
+    return Math.min(cap, hit / total * 6);
+  },
+
+  profileAffinity(candidate, profile, positive = true) {
+    const bucket = positive ? profile?.positive : profile?.negative;
+    if (!bucket) return 0;
+    const f = this.extractItemFeatures(candidate);
+    return (
+      this.bucketAffinity(f.genres, bucket.genres, 1.4) * 2.6 +
+      this.bucketAffinity(f.keywords, bucket.keywords, 1.5) * 2.4 +
+      this.bucketAffinity(f.directors, bucket.directors, 1.3) * 1.9 +
+      this.bucketAffinity(f.writers, bucket.writers, 1.2) * 1.2 +
+      this.bucketAffinity(f.actors, bucket.actors, 1.2) * 1.35 +
+      this.bucketAffinity(f.countries, bucket.countries, 1.0) * 0.75 +
+      this.bucketAffinity(f.languages, bucket.languages, 1.0) * 0.85 +
+      this.bucketAffinity(f.decades.map(String), bucket.decades, 1.0) * 0.45 +
+      this.bucketAffinity(f.runtimeBuckets, bucket.runtimeBuckets, 1.0) * 0.35
+    );
   },
 
   scoreCandidate(c, profile, filters, ctx = this.buildScoreContext([c])) {
-    const genreOverlap = (c.genres || []).filter(g => profile?.topGenres?.includes(g)).length;
-
-    const tasteScore = Math.min(10, genreOverlap * 3 + (profile?.topDecades?.includes(Math.floor((c.year || 0) / 10) * 10) ? 1.5 : 0));
     const quality = this.qualityScore(c, ctx);
-    const tmdbVoteStrength = this.normalizedVoteScore(c.voteCount, ctx.tmdbVoteP90);
-    const imdbVoteStrength = this.normalizedVoteScore(c.imdbVotes, ctx.imdbVoteP90);
-    const voteStrength = imdbVoteStrength ? (imdbVoteStrength * 0.6 + tmdbVoteStrength * 0.4) : tmdbVoteStrength;
+    const voteStrength = this.normalizedVoteScore(c.voteCount, ctx.tmdbVoteP90);
+    const positiveAffinity = this.profileAffinity(c, profile, true);
+    const negativeAffinity = this.profileAffinity(c, profile, false);
+    const languageMatch = filters.language && c.originalLanguage === filters.language ? 1 : 0;
+    const votePenalty = this.lowVotePenalty(c, filters);
 
     if (filters.style === 'random') {
-      return (voteStrength * 65) + (quality * 2.5) + Math.random() * 25 - this.lowVotePenalty(c, filters);
+      // Smart dice: still varied, but random is weighted toward quality and light taste fit.
+      return (voteStrength * 42) + (quality * 3.1) + (positiveAffinity * 2.2) - (negativeAffinity * 3.4) + Math.random() * 28 - votePenalty;
     }
 
-    const isLanguageSpecific = Boolean(filters.language);
-    const votePenalty = this.lowVotePenalty(c, filters);
-    let score = isLanguageSpecific
-      ? (tasteScore * 0.45) + (quality * 0.30) + (voteStrength * 8) + Math.random() * 2 - votePenalty
-      : (tasteScore * 0.35) + (quality * 0.30) + (voteStrength * 10) + Math.random() * 2 - votePenalty;
+    let score =
+      (positiveAffinity * 5.2) -
+      (negativeAffinity * 6.8) +
+      (quality * 2.7) +
+      (voteStrength * 11) +
+      (languageMatch * 8) +
+      Math.random() * 1.2 -
+      votePenalty;
 
     if (filters.style === 'hidden') {
-      // Hidden gems should be credible within their own pool, not globally high-vote.
-      score += voteStrength >= 0.18 && voteStrength <= 0.75 ? 5 : -2;
+      score += voteStrength >= 0.16 && voteStrength <= 0.72 ? 7 : -2;
+      score -= Math.min(5, Number(c.popularity || 0) / 55);
     }
-    if (filters.style === 'popular') score += Math.min(8, c.popularity / 40) + voteStrength * 6;
-    if (filters.style === 'wild') score += genreOverlap <= 1 ? 4 : 0;
-    if (filters.language && c.originalLanguage === filters.language) score += 8;
+    if (filters.style === 'popular') score += Math.min(9, Number(c.popularity || 0) / 36) + voteStrength * 7;
+    if (filters.style === 'wild') {
+      const genreOverlap = (c.genres || []).filter(g => profile?.topGenres?.includes(g)).length;
+      score += genreOverlap <= 1 ? 5 : -1.5;
+      score += positiveAffinity > 0.2 ? 1.5 : 0;
+    }
+    if (filters.style === 'because') score += positiveAffinity * 1.6;
     return score;
   },
 
@@ -645,50 +889,65 @@ const Recommendations = {
     return fresh.length >= needed ? fresh : candidates;
   },
 
+  jaccard(a = [], b = []) {
+    const A = new Set((a || []).map(x => String(x).toLowerCase()).filter(Boolean));
+    const B = new Set((b || []).map(x => String(x).toLowerCase()).filter(Boolean));
+    if (!A.size || !B.size) return 0;
+    let inter = 0;
+    A.forEach(x => { if (B.has(x)) inter += 1; });
+    return inter / (A.size + B.size - inter);
+  },
+
+  itemSimilarity(a = {}, b = {}) {
+    const af = this.extractItemFeatures(a);
+    const bf = this.extractItemFeatures(b);
+    return (
+      this.jaccard(af.genres, bf.genres) * 0.32 +
+      this.jaccard(af.keywords, bf.keywords) * 0.24 +
+      this.jaccard([...af.directors, ...af.writers], [...bf.directors, ...bf.writers]) * 0.18 +
+      this.jaccard(af.actors, bf.actors) * 0.12 +
+      this.jaccard(af.languages, bf.languages) * 0.06 +
+      this.jaccard(af.countries, bf.countries) * 0.05 +
+      this.jaccard(af.decades, bf.decades) * 0.03
+    );
+  },
+
+  mmrLambda(style = '') {
+    if (style === 'random') return 0.58;
+    if (style === 'wild') return 0.62;
+    if (style === 'because') return 0.82;
+    if (style === 'hidden') return 0.7;
+    return 0.76;
+  },
+
   pickWeightedDiverse(scored = [], filters = {}) {
     const count = Math.max(1, Number(filters.count || 3));
     if (!scored.length) return [];
 
-    // Use a broad pool so repeated clicks can actually change results. Taste-based modes
-    // stay closer to the top; random/discovery mode samples more widely.
-    const base = filters.style === 'random' ? 180 : (filters.style === 'wild' ? 120 : 90);
-    const poolSize = Math.min(scored.length, Math.max(count * 12, base));
-    const pool = scored.slice(0, poolSize);
-
+    const base = filters.style === 'random' ? 220 : (filters.style === 'wild' ? 150 : 110);
+    const poolSize = Math.min(scored.length, Math.max(count * 16, base));
+    let pool = scored.slice(0, poolSize);
     const selected = [];
     const used = new Set();
-    const seenGenreSignatures = new Set();
+    const lambda = this.mmrLambda(filters.style);
+    const maxScore = Math.max(...pool.map(c => Number(c._score || 0)), 1);
+    const minScore = Math.min(...pool.map(c => Number(c._score || 0)), 0);
+    const range = Math.max(1, maxScore - minScore);
 
     while (selected.length < count && used.size < pool.length) {
       const available = pool.filter(c => !used.has(this.candidateKey(c)));
       if (!available.length) break;
+      const ranked = available.map(c => {
+        const relevance = (Number(c._score || 0) - minScore) / range;
+        const redundancy = selected.length ? Math.max(...selected.map(s => this.itemSimilarity(c, s))) : 0;
+        return { c, mmr: lambda * relevance - (1 - lambda) * redundancy };
+      }).sort((a, b) => b.mmr - a.mmr);
 
-      const candidate = this.weightedSample(available, filters);
-      const key = this.candidateKey(candidate);
-      used.add(key);
-
-      // Light diversity: avoid filling every slot with the exact same genre bundle when
-      // there are enough alternatives. This keeps Telugu/Tamil/etc. pools from looking
-      // like the same few titles reshuffled.
-      const signature = (candidate.genres || []).slice(0, 2).sort().join('|');
-      if (signature && seenGenreSignatures.has(signature) && selected.length < count - 1) {
-        const alternatives = available.filter(c => {
-          const sig = (c.genres || []).slice(0, 2).sort().join('|');
-          return sig !== signature && !used.has(this.candidateKey(c));
-        });
-        if (alternatives.length >= (count - selected.length)) continue;
-      }
-
-      if (signature) seenGenreSignatures.add(signature);
+      // Sample from the top MMR slice so lists are diverse but still not deterministic.
+      const slice = ranked.slice(0, Math.max(8, count * 4)).map(x => ({ ...x.c, _score: x.mmr * 100 }));
+      const candidate = this.weightedSample(slice, filters) || ranked[0].c;
+      used.add(this.candidateKey(candidate));
       selected.push(candidate);
-    }
-
-    if (selected.length < count) {
-      for (const c of pool) {
-        const key = this.candidateKey(c);
-        if (!selected.some(s => this.candidateKey(s) === key)) selected.push(c);
-        if (selected.length >= count) break;
-      }
     }
 
     return selected.slice(0, count);
@@ -715,3 +974,4 @@ const Recommendations = {
     return [...arr].sort(() => Math.random() - 0.5);
   },
 };
+try { globalThis.Recommendations = Recommendations; } catch (_) {}

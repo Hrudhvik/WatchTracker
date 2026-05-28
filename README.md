@@ -2,7 +2,7 @@
 
 Track movies and TV shows, manage your watchlist, log diary entries, open custom quick links from detail pages, and get recommendations based on your own library.
 
-WatchTracker is a local-first Chrome extension powered by TMDB, with optional OMDb/IMDb ratings support.
+WatchTracker is a local-first Chrome extension powered by TMDB.
 
 ## Features
 
@@ -16,7 +16,6 @@ WatchTracker is a local-first Chrome extension powered by TMDB, with optional OM
 - **Export/Import** your data as a JSON backup.
 - **MyAnimeList sync** for anime tracking.
 - **Recommendations** from the full app and popup.
-- **Optional IMDb ratings** through OMDb.
 - **External links** to TMDB, IMDb, and Letterboxd for movies.
 - **Custom Quick Links** for opening a movie or TV show search on streaming/search sites.
 - **Default Quick Links** for Netflix, Prime Video, Hulu, and YouTube.
@@ -158,8 +157,6 @@ Recommendations use vote confidence to avoid unreliable picks. The engine consid
 
 - TMDB rating.
 - TMDB vote count.
-- Optional IMDb rating from OMDb.
-- Optional IMDb vote count from OMDb.
 - Your personal ratings and saved library.
 - Genre, language, type, and decade filters.
 - Recently shown recommendations, so repeated clicks do not simply reshuffle the same titles.
@@ -190,19 +187,6 @@ The widget uses temporary tab/session memory to reduce repeated suggestions whil
 
 The randomizer uses TMDB discovery data and your saved WatchTracker library. By default, it avoids titles already in your WatchTracker movie list unless **Include already watched** is enabled.
 
-## OMDb / IMDb Support
-
-OMDb support is optional. If you add an OMDb API key, WatchTracker can show IMDb ratings and IMDb vote counts.
-
-Used for:
-
-- IMDb rating display.
-- IMDb vote confidence.
-- IMDb links on detail pages when an IMDb ID is available.
-- Better recommendation scoring when IMDb data exists.
-
-Without an OMDb key, WatchTracker continues to work using TMDB only.
-
 ## External Links
 
 Detail pages can include:
@@ -222,7 +206,6 @@ https://letterboxd.com/tmdb/{tmdbId}/
 
 Settings are grouped into collapsible sections, including:
 
-- **API Keys** — TMDB, OMDb, and MyAnimeList settings.
 - **Quick Links** — default links, custom links, selection, editing, and arrange mode.
 - **Letterboxd Surprise Widget** — enable or disable the Letterboxd home-page dice widget.
 - **Export/Import** — backup and restore data.
@@ -240,14 +223,10 @@ Settings are grouped into collapsible sections, including:
 
 TMDB is required for search, posters, metadata, and recommendations.
 
-### 2. Optional: Get an OMDb API Key
 
-1. Go to [omdbapi.com](https://www.omdbapi.com/).
 2. Get an API key.
 3. Paste it into WatchTracker settings.
-4. Use the clear button in settings if you ever want to remove the saved OMDb key and OMDb cache.
 
-OMDb is optional and is only used for IMDb ratings/votes and extra IMDb data.
 
 ### 3. Optional: MyAnimeList Sync
 
@@ -277,11 +256,9 @@ Your library, diary, settings, API keys, Quick Links, Letterboxd widget preferen
 External services used:
 
 - **TMDB** for search, posters, metadata, genres, languages, and discovery.
-- **OMDb** for optional IMDb rating/vote data.
 - **MyAnimeList** only if MAL sync is configured.
 - **Enabled Quick Link sites** only when you click those links.
 
-Use **Export/Import** in settings to create or restore JSON backups. Settings also include clear actions for saved TMDB keys, OMDb keys/cache, and MyAnimeList client/login data.
 
 ## Development Notes
 
@@ -292,7 +269,6 @@ Main files:
 - `popup.html`, `popup.js`, `popup.css` — popup UI and popup detail Quick Links.
 - `store.js` — local storage/data helpers, including Quick Link defaults and persistence.
 - `tmdb.js` — TMDB API helpers.
-- `omdb.js` — optional OMDb API helpers.
 - `recommendations.js` — recommendation engine.
 - `ui-recommendations.js` — recommendations page UI.
 - `ui-detail.js` — movie/show detail UI and detail-page Quick Links.

@@ -802,6 +802,13 @@ const SyncEngine = {
           Store.addMovie({
             tmdbId: storeId,
             malId: entry.malId || null,
+            mediaId: Store._newMediaId ? Store._newMediaId() : undefined,
+            mediaKind: isMal ? 'anime' : 'movie',
+            granularity: 'movie',
+            externalIds: [
+              ...(entry.malId ? [{ provider: 'mal', providerType: 'anime', id: entry.malId, relation: isMal ? 'primary' : 'same_as' }] : []),
+              ...(entry.matched && entry.tmdbId && entry.tmdbId > 0 ? [{ provider: 'tmdb', providerType: 'movie', id: entry.tmdbId, relation: 'same_as' }] : []),
+            ],
             title,
             posterPath: poster,
             backdropPath: null,
@@ -842,6 +849,14 @@ const SyncEngine = {
           Store.addTvShow({
             tmdbId: storeId,
             malId: entry.malId || null,
+            mediaId: Store._newMediaId ? Store._newMediaId() : undefined,
+            mediaKind: isMal ? 'anime' : 'tv',
+            granularity: isMal ? 'mal_entry' : 'series',
+            externalIds: [
+              ...(entry.malId ? [{ provider: 'mal', providerType: 'anime', id: entry.malId, relation: 'primary' }] : []),
+              ...(isMal && entry.matched && entry.tmdbId && entry.tmdbId > 0 ? [{ provider: 'tmdb', providerType: 'tv', id: entry.tmdbId, relation: 'included_in_series' }] : []),
+              ...(!isMal && entry.tmdbId && entry.tmdbId > 0 ? [{ provider: 'tmdb', providerType: 'tv', id: entry.tmdbId, relation: 'same_as' }] : []),
+            ],
             // Store the matched TMDB ID separately so we can use it for fallback data (cast, backdrops)
             malTmdbId: (isMal && entry.matched && entry.tmdbId) ? entry.tmdbId : null,
             title,
@@ -921,6 +936,9 @@ const SyncEngine = {
         updated++;
       }
 
+      const syncedMedia = isMalTv ? Store.getTvShowByMalId(entry.malId)
+        : (isMovie ? Store.getMovie(storeId) : Store.getTvShow(storeId));
+
       // Diary entry
       if (entry.watchDate) {
         const effectiveRating = malRatings[storeId] || malRatings['mal-' + entry.malId] || entry.rating || null;
@@ -934,6 +952,8 @@ const SyncEngine = {
           const actionText = entry.isRewatch ? 'rewatch' : 'watched';
           const newEntry = {
             tmdbId: storeId,
+            mediaId: syncedMedia?.mediaId || null,
+            malId: entry.malId || null,
             title: entry.tmdbTitle || entry.title,
             type: isMovie ? 'movie' : 'tv',
             posterPath: poster,
@@ -944,18 +964,23 @@ const SyncEngine = {
             mood: null, episodes: null, season: null,
             timestamp: new Date().toISOString(),
             syncSource: entry.source,
+            sourceEventKey: entry.source === 'letterboxd' && entry.guid ? `letterboxd:${entry.guid}`
+              : (entry.malId ? `${entry.source}:anime:${entry.malId}:${actionText}:${entry.watchDate}`
+                : `${entry.source}:${isMovie ? 'movie' : 'tv'}:${storeId}:${actionText}:${entry.watchDate}`),
           };
-          Store.addDiaryEntry(newEntry);
-          Store.addActivity({
-            tmdbId: storeId,
-            title: entry.tmdbTitle || entry.title,
-            type: isMovie ? 'movie' : 'tv',
-            posterPath: poster,
-            action: actionText,
-            detail: entry.isRewatch ? 'Marked as completed - Rewatch' : 'Marked as completed',
-            timestamp: new Date().toISOString()
-          });
-          diaryAdded++;
+          const insertedDiary = Store.addDiaryEntry(newEntry);
+          if (insertedDiary) {
+            Store.addActivity({
+              tmdbId: storeId,
+              title: entry.tmdbTitle || entry.title,
+              type: isMovie ? 'movie' : 'tv',
+              posterPath: poster,
+              action: actionText,
+              detail: entry.isRewatch ? 'Marked as completed - Rewatch' : 'Marked as completed',
+              timestamp: new Date().toISOString()
+            });
+            diaryAdded++;
+          }
           
           if (entry.isRewatch) {
             const existingMedia = isMalTv ? Store.getTvShowByMalId(entry.malId)
@@ -2056,6 +2081,8 @@ const ImportExport = {
               notes: '', rating,
               mood: null, episodes: null, season: null,
               timestamp: new Date().toISOString(),
+              syncSource: 'letterboxd-csv',
+              sourceEventKey: uri ? `letterboxd:${uri}:${date}:${action}` : `letterboxd-csv:${tmdb.type}:${tmdb.id}:${date}:${action}`,
             });
             diaryAdded++;
           }

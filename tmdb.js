@@ -29,12 +29,12 @@ const TMDB = {
 
   // Full movie details with credits
   async movieDetails(id) {
-    return this._fetch(`/movie/${id}`, { append_to_response: 'credits,videos,recommendations' });
+    return this._fetch(`/movie/${id}`, { append_to_response: 'credits,videos,recommendations,keywords,external_ids' });
   },
 
   // Full TV show details
   async tvDetails(id) {
-    return this._fetch(`/tv/${id}`, { append_to_response: 'credits,videos,recommendations,external_ids' });
+    return this._fetch(`/tv/${id}`, { append_to_response: 'credits,videos,recommendations,similar,keywords,external_ids' });
   },
 
   // TV season details (episodes list)
@@ -58,6 +58,15 @@ const TMDB = {
       sort_by: 'vote_average.desc',
       ...params,
     });
+  },
+
+
+  async movieDetailsForRecommendation(id) {
+    return this._fetch(`/movie/${id}`, { append_to_response: 'credits,keywords,external_ids' });
+  },
+
+  async tvDetailsForRecommendation(id) {
+    return this._fetch(`/tv/${id}`, { append_to_response: 'credits,keywords,external_ids' });
   },
 
   async movieRecommendations(id, page = 1) {
@@ -89,3 +98,4 @@ const TMDB = {
     return path ? `${TMDB_IMG}${size}${path}` : null;
   },
 };
+try { globalThis.TMDB = TMDB; } catch (_) {}

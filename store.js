@@ -20,24 +20,111 @@ const DEFAULT_QUICK_LINKS = [
 const ACTIVE_DEFAULT_QUICK_LINK_IDS = new Set(DEFAULT_QUICK_LINKS.map(link => link.id));
 
 const Store = {
-  _data: { apiKey: '', omdbKey: '', movies: [], tvshows: [], diary: [], activity: [], theme: null, popupPrefs: null, letterboxdWidgetEnabled: true, quickLinks: [], quickLinkDefaultsSeeded: false },
+  _data: { apiKey: '', movies: [], tvshows: [], diary: [], activity: [], theme: null, popupPrefs: null, letterboxdWidgetEnabled: true, quickLinks: [], quickLinkDefaultsSeeded: false },
   _nextId: 1,
+
+  _newMediaId() {
+    return 'wt_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+  },
+
+  _cleanProviderId(id) {
+    if (id == null || id === '') return null;
+    if (typeof id === 'object') {
+      if (id.movie != null) return Number(id.movie);
+      if (id.tv != null) return Number(id.tv);
+      if (id.id != null) return Number(id.id);
+      return null;
+    }
+    const n = Number(id);
+    return Number.isFinite(n) ? n : null;
+  },
+
+  _externalKey(link) {
+    return `${link.provider}:${link.providerType}:${link.id}`;
+  },
+
+  _inferExternalIds(item, mediaType) {
+    const out = [];
+    const add = (provider, providerType, id, relation = 'primary') => {
+      const cleanId = this._cleanProviderId(id);
+      if (cleanId == null || cleanId === 0) return;
+      out.push({ provider, providerType, id: cleanId, relation });
+    };
+    if (Array.isArray(item.externalIds)) {
+      item.externalIds.forEach(l => {
+        if (!l) return;
+        add(l.provider, l.providerType || l.type || mediaType, l.id, l.relation || 'primary');
+      });
+    }
+    if (item.malId) add('mal', 'anime', item.malId, item.sourceTag === 'anime' ? 'primary' : 'same_as');
+    const rawTmdb = item.tmdbId;
+    if (typeof rawTmdb === 'object' && rawTmdb) {
+      if (rawTmdb.movie != null) add('tmdb', 'movie', rawTmdb.movie, 'candidate');
+      if (rawTmdb.tv != null) add('tmdb', 'tv', rawTmdb.tv, 'candidate');
+    } else if (Number(rawTmdb) > 0) {
+      add('tmdb', mediaType === 'movie' ? 'movie' : 'tv', rawTmdb, item.sourceTag === 'anime' && mediaType === 'tv' ? 'included_in_series' : 'same_as');
+    }
+    if (item.malTmdbId) add('tmdb', mediaType === 'movie' ? 'movie' : 'tv', item.malTmdbId, item.sourceTag === 'anime' && mediaType === 'tv' ? 'included_in_series' : 'same_as');
+    const seen = new Set();
+    return out.filter(l => {
+      if (!l.provider || !l.providerType || l.id == null) return false;
+      const k = this._externalKey(l);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  },
+
+  _normalizeMediaIdentity(item, mediaType) {
+    if (!item.mediaId) item.mediaId = this._newMediaId();
+    if (!item.mediaKind) item.mediaKind = item.sourceTag === 'anime' ? 'anime' : mediaType;
+    if (!item.granularity) item.granularity = mediaType === 'movie' ? 'movie' : (item.sourceTag === 'anime' ? 'mal_entry' : 'series');
+    item.externalIds = this._inferExternalIds(item, mediaType);
+    // Legacy exports sometimes stored tmdbId as { tv: 123 } or as a negative MAL surrogate.
+    // Keep tmdbId primitive for old UI code and keep real provider links in externalIds.
+    if (typeof item.tmdbId === 'object' && item.tmdbId) {
+      const clean = this._cleanProviderId(item.tmdbId);
+      item.malTmdbId = item.malTmdbId || clean || null;
+      item.tmdbId = item.sourceTag === 'anime' && item.malId ? -Math.abs(Number(item.malId)) : clean;
+    }
+    if ((item.tmdbId == null || item.tmdbId === 0) && item.sourceTag === 'anime' && item.malId) {
+      item.tmdbId = -Math.abs(Number(item.malId));
+    }
+    return item;
+  },
+
+  findByExternalId(provider, providerType, id) {
+    const cleanId = this._cleanProviderId(id);
+    if (cleanId == null) return null;
+    return this.getAll().find(item => (item.externalIds || []).some(l => l.provider === provider && l.providerType === providerType && Number(l.id) === cleanId)) || null;
+  },
 
   _assignIds() {
     let maxId = 0;
     [...this._data.movies, ...this._data.tvshows].forEach(item => { if (item._id && item._id > maxId) maxId = item._id; });
     this._nextId = maxId + 1;
     let changed = false;
-    this._data.movies.forEach(m => { if (!m._id) { m._id = this._nextId++; changed = true; } });
-    this._data.tvshows.forEach(t => { if (!t._id) { t._id = this._nextId++; changed = true; } });
+    this._data.movies.forEach(m => {
+      if (!m._id) { m._id = this._nextId++; changed = true; }
+      const before = JSON.stringify([m.mediaId, m.externalIds, m.mediaKind, m.granularity, m.tmdbId, m.malTmdbId]);
+      this._normalizeMediaIdentity(m, 'movie');
+      if (before !== JSON.stringify([m.mediaId, m.externalIds, m.mediaKind, m.granularity, m.tmdbId, m.malTmdbId])) changed = true;
+    });
+    this._data.tvshows.forEach(t => {
+      if (!t._id) { t._id = this._nextId++; changed = true; }
+      const before = JSON.stringify([t.mediaId, t.externalIds, t.mediaKind, t.granularity, t.tmdbId, t.malTmdbId]);
+      this._normalizeMediaIdentity(t, 'tv');
+      if (before !== JSON.stringify([t.mediaId, t.externalIds, t.mediaKind, t.granularity, t.tmdbId, t.malTmdbId])) changed = true;
+    });
     if (changed) { this._saveMovies(); this._saveTvShows(); }
   },
 
   async load() {
+    // Remove legacy OMDb settings/cache so the extension never keeps or uses OMDb credentials.
+    try { chrome.storage.local.remove(['omdbKey', 'omdbCache']); } catch (_) {}
     return new Promise(resolve => {
-      chrome.storage.local.get(['apiKey', 'omdbKey', 'movies', 'tvshows', 'diary', 'activity', 'theme', 'popupPrefs', 'letterboxdWidgetEnabled', 'quickLinks', 'quickLinkDefaultsSeeded'], d => {
+      chrome.storage.local.get(['apiKey', 'movies', 'tvshows', 'diary', 'activity', 'theme', 'popupPrefs', 'letterboxdWidgetEnabled', 'quickLinks', 'quickLinkDefaultsSeeded'], d => {
         this._data.apiKey = d.apiKey || '';
-        this._data.omdbKey = d.omdbKey || '';
         this._data.movies = d.movies || [];
         this._data.tvshows = d.tvshows || [];
         this._data.diary = d.diary || [];
@@ -72,19 +159,15 @@ const Store = {
     chrome.storage.local.set({ apiKey: key });
   },
 
-  // OMDb Key
-  getOmdbKey() { return this._data.omdbKey || ''; },
-  setOmdbKey(key) {
-    this._data.omdbKey = key;
-    chrome.storage.local.set({ omdbKey: key });
-  },
-
   // ─── Movies ───
   getMovies() { return this._data.movies; },
 
   addMovie(item) {
-    if (this._data.movies.find(m => m.tmdbId === item.tmdbId)) return false;
-    if (item.malId && this._data.movies.find(m => m.malId === item.malId)) return false;
+    this._normalizeMediaIdentity(item, 'movie');
+    const tmdb = this._cleanProviderId(item.tmdbId);
+    if (typeof item.tmdbId === 'object' && tmdb != null) item.tmdbId = tmdb;
+    if (tmdb != null && tmdb > 0 && this._data.movies.find(m => this._cleanProviderId(m.tmdbId) === tmdb)) return false;
+    if (item.malId && this._data.movies.find(m => Number(m.malId) === Number(item.malId))) return false;
     if (!item._id) item._id = this._nextId++;
     this._data.movies.unshift(item);
     this._saveMovies();
@@ -139,6 +222,11 @@ const Store = {
   getTvShows() { return this._data.tvshows; },
 
   addTvShow(item) {
+    this._normalizeMediaIdentity(item, 'tv');
+    if (typeof item.tmdbId === 'object') {
+      const clean = this._cleanProviderId(item.tmdbId);
+      if (clean != null) item.tmdbId = clean;
+    }
     // Anime entries from MAL are stored per-MAL-entry (each MAL season is separate).
     // Allow multiple anime entries with the same TMDB ID but different MAL IDs.
     if (item.sourceTag === 'anime' && item.malId) {
@@ -203,10 +291,43 @@ const Store = {
   // ─── Diary (completion log) ───
   getDiary() { return this._data.diary; },
 
+  makeDiarySourceEventKey(entry) {
+    if (entry.sourceEventKey) return entry.sourceEventKey;
+    const source = entry.syncSource || entry.source || 'manual';
+    if (source === 'manual') return null;
+    if (entry.malId) return `${source}:anime:${entry.malId}:${entry.action || 'watched'}:${entry.date || ''}`;
+    if (entry.letterboxdGuid) return `letterboxd:${entry.letterboxdGuid}`;
+    const providerId = entry.tmdbId != null ? entry.tmdbId : (entry.mediaId || entry.title || 'unknown');
+    return `${source}:${entry.type || 'media'}:${providerId}:${entry.action || 'watched'}:${entry.date || ''}:${entry.season || ''}`;
+  },
+
   addDiaryEntry(entry) {
-    // entry: { tmdbId, title, type, posterPath, date, action, notes, rating, mood, episodes, timestamp }
+    // entry: { mediaId, tmdbId, title, type, posterPath, date, action, notes, rating, mood, episodes, timestamp, sourceEventKey }
+    if (!entry.timestamp) entry.timestamp = new Date().toISOString();
+    const key = this.makeDiarySourceEventKey(entry);
+    if (key) entry.sourceEventKey = key;
+    const existingIdx = key ? this._data.diary.findIndex(d => d.sourceEventKey === key) : -1;
+    if (existingIdx !== -1) {
+      this._data.diary[existingIdx] = { ...this._data.diary[existingIdx], ...entry, timestamp: this._data.diary[existingIdx].timestamp || entry.timestamp };
+      chrome.storage.local.set({ diary: this._data.diary });
+      return false;
+    }
+    // Defensive import/sync dedupe for older entries without sourceEventKey. Manual diary can still log multiple watches.
+    if (entry.syncSource || entry.source) {
+      const titleLower = (entry.title || '').toLowerCase();
+      const oldIdx = this._data.diary.findIndex(d =>
+        d.date === entry.date && d.type === entry.type && (d.action || 'watched') === (entry.action || 'watched') &&
+        (d.tmdbId === entry.tmdbId || (entry.malId && d.malId === entry.malId) || ((d.title || '').toLowerCase() === titleLower && titleLower))
+      );
+      if (oldIdx !== -1) {
+        this._data.diary[oldIdx] = { ...this._data.diary[oldIdx], ...entry, timestamp: this._data.diary[oldIdx].timestamp || entry.timestamp };
+        chrome.storage.local.set({ diary: this._data.diary });
+        return false;
+      }
+    }
     this._data.diary.unshift(entry);
     chrome.storage.local.set({ diary: this._data.diary });
+    return true;
   },
 
   removeDiaryEntry(tmdbId, timestamp) {
@@ -520,6 +641,7 @@ const Store = {
         }
       }
     }
+    this._assignIds();
     this._saveMovies();
     this._saveTvShows();
     chrome.storage.local.set({ diary: this._data.diary, activity: this._data.activity, quickLinks: this._data.quickLinks });
@@ -537,3 +659,4 @@ const Store = {
     chrome.storage.local.set({ diary: [], activity: [], quickLinks: [] });
   },
 };
+try { globalThis.Store = Store; } catch (_) {}

@@ -257,6 +257,55 @@
     return copy;
   }
 
+  function decadeToNumber(value) {
+    if (!value || value === 'pre1900') return '';
+    const n = parseInt(String(value).slice(0, 4), 10);
+    return Number.isFinite(n) ? String(n) : '';
+  }
+
+  function recommendationToMovie(item) {
+    if (!item) return null;
+    const genreIds = (item.genres || []).map(name => GENRES[name]).filter(Boolean);
+    return {
+      id: Number(item.tmdbId || item.id || 0),
+      title: item.title || item.name || '',
+      release_date: item.year ? `${item.year}-01-01` : '',
+      poster_path: item.posterPath || item.poster_path || '',
+      backdrop_path: item.backdropPath || item.backdrop_path || '',
+      vote_average: Number(item.voteAverage || item.vote_average || 0),
+      vote_count: Number(item.voteCount || item.vote_count || 0),
+      overview: item.overview || '',
+      genre_ids: genreIds,
+      original_language: item.originalLanguage || item.original_language || '',
+      _watchTrackerReason: item.reason || '',
+      _watchTrackerScore: item._score || 0,
+    };
+  }
+
+  function suggestViaWatchTracker(filters) {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        type: 'watchtracker:recommend',
+        filters: {
+          style: 'random',
+          count: 1,
+          genre: filters.genre,
+          language: filters.language,
+          decade: decadeToNumber(filters.decade),
+          minTmdbRating: filters.rating,
+          includeWatched: filters.includeWatched,
+        },
+      }, response => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        if (!response?.ok) return reject(new Error(response?.error || 'Smart dice unavailable.'));
+        const item = response.body?.results?.[0];
+        const movie = recommendationToMovie(item);
+        if (!movie?.id) return reject(new Error('Smart dice found no matching movie.'));
+        resolve(movie);
+      });
+    });
+  }
+
   function validMovie(movie) {
     return movie && movie.id && movie.title && !movie.adult && movie.vote_average > 0;
   }
@@ -264,6 +313,16 @@
   async function suggestMovie(filters) {
     const apiKey = await getApiKey();
     if (!apiKey) throw new Error('Add your TMDB API key in WatchTracker settings first.');
+
+    // Prefer the shared WatchTracker recommendation engine. It uses local ratings/history,
+    // positive + negative taste features, Bayesian quality, and MMR diversity. The older
+    // discover-only randomizer remains as a fallback if the background worker is unavailable.
+    try {
+      const smartMovie = await suggestViaWatchTracker(filters);
+      if (smartMovie && (filters.includeWatched || !(await getWatchedMovieIds()).has(Number(smartMovie.id)))) return smartMovie;
+    } catch (e) {
+      console.warn('Smart Letterboxd dice fallback triggered', e);
+    }
 
     const watchedIds = filters.includeWatched ? new Set() : await getWatchedMovieIds();
     const shown = getShown(filters);
@@ -348,7 +407,7 @@
           <div>
             <div class="wt-lb-kicker">WatchTracker</div>
             <div class="wt-lb-title">Surprise movie</div>
-            <div class="wt-lb-subtitle">Find a random Letterboxd-friendly pick.</div>
+            <div class="wt-lb-subtitle">Smart dice uses your WatchTracker taste, with random fallback.</div>
           </div>
           <button class="wt-lb-close" type="button" aria-label="Close">×</button>
         </div>
@@ -422,6 +481,7 @@
       const title = escapeHtml(movie.title);
       const overview = escapeHtml(movie.overview || 'No overview available.');
       const genreText = (movie.genre_ids || []).map(id => GENRE_NAMES_BY_ID[id]).filter(Boolean).slice(0, 3).join(', ') || 'Movie';
+      const reason = movie._watchTrackerReason ? `<div class="wt-lb-tags">${escapeHtml(movie._watchTrackerReason)}</div>` : '';
       const language = movie.original_language ? movie.original_language.toUpperCase() : 'N/A';
       const goUrl = letterboxdTmdbUrl(movie.id);
       result.innerHTML = `
@@ -431,6 +491,7 @@
             <div class="wt-lb-movie-title">${title}</div>
             <div class="wt-lb-meta">${escapeHtml(year)} · ${escapeHtml(language)} · TMDB ${rating}/10</div>
             <div class="wt-lb-tags">${escapeHtml(genreText)}</div>
+            ${reason}
             <div class="wt-lb-overview">${overview}</div>
             <a class="wt-lb-go" href="${goUrl}">Go</a>
           </div>

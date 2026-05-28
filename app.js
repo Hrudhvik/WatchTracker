@@ -23,6 +23,28 @@ function toast(msg) {
 
 const App = {
   _pages: ['movies', 'tvshows', 'lists', 'diary', 'profile', 'activity'],
+  _detailReturnContext: null,
+  _restoreSearchOverlay: null,
+  _suppressHashUpdate: false,
+
+  _pageHash(name) {
+    const pages = ['watchlist', 'diary', 'recommendations', 'profile', 'activity'];
+    return pages.includes(name) ? `#${name}` : '#watchlist';
+  },
+
+  setDetailReturnContext(ctx) {
+    this._detailReturnContext = ctx || null;
+  },
+
+  returnFromDetailIfPossible() {
+    const ctx = this._detailReturnContext;
+    this._detailReturnContext = null;
+    if (ctx && ctx.type === 'search' && typeof this._restoreSearchOverlay === 'function') {
+      this._restoreSearchOverlay(ctx.query || '');
+      return true;
+    }
+    return false;
+  },
 
   navigate(pageId) {
     if (!this._pages.includes(pageId)) pageId = 'movies';
@@ -49,7 +71,21 @@ const App = {
   },
   _lastScrollPos: {},
 
-  showPage(name) {
+  showPage(name, opts = {}) {
+    const validPages = ['watchlist', 'diary', 'recommendations', 'profile', 'activity', 'detail'];
+    if (!validPages.includes(name)) name = 'watchlist';
+
+    // Keep refresh on the same top-level page without disturbing detail hashes.
+    if (name !== 'detail' && !opts.skipHash && !this._suppressHashUpdate) {
+      const nextHash = this._pageHash(name);
+      if (window.location.hash !== nextHash) history.replaceState(null, '', nextHash);
+    }
+
+    document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.view === name);
+    });
+    currentView = name === 'detail' ? currentView : name;
+
     // Save scroll position of current page before switching
     const currentPage = document.querySelector('.page.active-page');
     if (currentPage) {
@@ -71,6 +107,9 @@ const App = {
     if (name !== 'detail' && typeof DetailUI !== 'undefined') {
       DetailUI._navHistory = [];
       DetailUI._currentDetail = null;
+      if (window.location.hash && window.location.hash.startsWith('#detail-')) {
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
     }
     // Hide alphabet rail when leaving watchlist
     if (name !== 'watchlist') {
@@ -94,10 +133,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const key = Store.getApiKey();
   if (key) { TMDB.setKey(key); document.getElementById('apiKeyInput').value = key; }
-  const omdbKey = Store.getOmdbKey ? Store.getOmdbKey() : '';
-  const omdbInput = document.getElementById('omdbKeyInput');
-  if (omdbInput) omdbInput.value = omdbKey || '';
-  if (omdbKey && window.OMDB) OMDB.setKey(omdbKey);
   if (window.MalOAuth && MalOAuth.getClientId) {
     const malInput = document.getElementById('malClientId');
     if (malInput) malInput.value = MalOAuth.getClientId() || '';
@@ -114,14 +149,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Apply saved theme
   ThemeEngine.init();
 
-  // Hash routing from popup
+  // Hash routing from popup / refresh. Keep the user on the same page after reload.
   const hash = window.location.hash;
   if (hash === '#settings') {
     document.getElementById('settingsModal').classList.remove('hidden');
   } else if (hash.startsWith('#detail-')) {
-    const parts = hash.replace('#detail-', '').split('-');
-    const type = parts[0], id = parseInt(parts[1]);
-    if (id && type) DetailUI.open(id, type);
+    const match = hash.match(/^#detail-(movie|tv)-(-?\d+)$/);
+    if (match) {
+      const type = match[1];
+      const id = parseInt(match[2], 10);
+      if (Number.isFinite(id) && type) DetailUI.open(id, type, false);
+    }
+  } else {
+    const pageFromHash = (hash || '#watchlist').replace('#', '');
+    if (['watchlist', 'diary', 'recommendations', 'profile', 'activity'].includes(pageFromHash)) {
+      App.showPage(pageFromHash, { skipHash: true });
+    }
   }
 
   if (!key) document.getElementById('settingsModal').classList.remove('hidden');
@@ -130,10 +173,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ─── Sidebar Nav ───
   document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.nav-item[data-view]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      currentView = btn.dataset.view;
-      App.showPage(currentView);
+      App.showPage(btn.dataset.view);
     });
   });
 
@@ -177,13 +217,316 @@ document.addEventListener('DOMContentLoaded', async () => {
   const sidebarInput = document.getElementById('globalSearch');
   let searchTimeout = null;
 
-  function openSearch() {
+  function openSearch(query = '') {
     overlay.classList.remove('hidden');
-    overlayInput.value = '';
-    overlayResults.innerHTML = '<div class="overlay-msg">Type to search TMDB for movies and TV shows</div>';
+    overlayInput.value = query || '';
+    overlayResults.innerHTML = '<div class="overlay-msg">Type to search TMDB + MAL</div>';
     setTimeout(() => overlayInput.focus(), 50);
+    if (query && query.trim().length >= 2) overlayInput.dispatchEvent(new Event('input'));
   }
-  function closeSearch() { overlay.classList.add('hidden'); overlayInput.value = ''; overlayResults.innerHTML = ''; }
+  function closeSearch({ keepQuery = false } = {}) {
+    overlay.classList.add('hidden');
+    if (!keepQuery) overlayInput.value = '';
+    overlayResults.innerHTML = '';
+  }
+  App._restoreSearchOverlay = (query = '') => {
+    App.showPage('watchlist');
+    openSearch(query);
+  };
+
+
+  async function openOverlayMALInDetail(malId, seedAnime = null) {
+    const id = Number(malId);
+    if (!Number.isFinite(id)) return;
+
+    const storedMovie = Store.getMovies().find(m => Number(m.malId) === id);
+    if (storedMovie) {
+      App.setDetailReturnContext({ type: 'search', query: overlayInput.value.trim() });
+      closeSearch({ keepQuery: true });
+      DetailUI.open(storedMovie.tmdbId, storedMovie.mediaType || 'movie');
+      return;
+    }
+
+    const storedTv = Store.getTvShowByMalId(id);
+    if (storedTv) {
+      App.setDetailReturnContext({ type: 'search', query: overlayInput.value.trim() });
+      closeSearch({ keepQuery: true });
+      DetailUI.open(storedTv.tmdbId, storedTv.mediaType || 'tv');
+      return;
+    }
+
+    let anime = seedAnime;
+    if (!anime || !anime.mal_id) {
+      try { anime = await overlayFetchMALAnimeFull(id); } catch (_) { anime = seedAnime || { mal_id: id }; }
+    }
+
+    const isMovie = overlayIsMalMovie(anime || {});
+    const title = overlayMalTitle(anime || {}) || `MAL #${id}`;
+    const poster = overlayMalPoster(anime || null);
+    const year = overlayMalYear(anime || {}) || 0;
+    const score = anime && anime.score ? Number(anime.score) : 0;
+    const episodes = anime && anime.episodes ? Number(anime.episodes) : 0;
+    const genres = ((anime && anime.genres) || []).map(g => g && g.name).filter(Boolean);
+
+    DetailUI._tempStored = {
+      tmdbId: -id,
+      malId: id,
+      title,
+      posterPath: poster,
+      backdropPath: anime?.trailer?.images?.maximum_image_url || null,
+      year: parseInt(year) || 0,
+      voteAverage: score || 0,
+      runtime: 0,
+      totalSeasons: isMovie ? 0 : 1,
+      totalEpisodes: episodes || 0,
+      genres,
+      watchStatus: null,
+      rewatchCount: 0,
+      rewatchHistory: [],
+      startDate: '',
+      endDate: '',
+      seasons: isMovie ? [] : [{ seasonNumber: 1, episodeCount: episodes || 0, episodesWatched: 0 }],
+      sourceTag: 'anime',
+      syncSource: 'mal-search',
+      mediaType: isMovie ? 'movie' : 'tv',
+      externalIds: [{ provider: 'mal', providerType: 'anime', id, relation: 'primary' }],
+    };
+
+    App.setDetailReturnContext({ type: 'search', query: overlayInput.value.trim() });
+    closeSearch({ keepQuery: true });
+    DetailUI.open(-id, isMovie ? 'movie' : 'tv');
+  }
+
+  async function openOverlayMALDetail(malId) {
+    overlayResults.innerHTML = '<div class="overlay-msg">Loading MAL details...</div>';
+    try {
+      const anime = await overlayFetchMALAnimeFull(malId);
+      if (!anime) throw new Error('MAL anime not found');
+      const isMovie = overlayIsMalMovie(anime);
+      const title = overlayMalTitle(anime);
+      const yr = overlayMalYear(anime) || '';
+      const poster = overlayMalPoster(anime);
+      const score = anime.score ? Number(anime.score).toFixed(1) : '—';
+      const type = anime.type || (isMovie ? 'Movie' : 'TV');
+      const eps = anime.episodes ? `${anime.episodes} episodes` : '';
+      const status = anime.status || '';
+      const genres = (anime.genres || []).map(g => g.name).filter(Boolean).join(', ');
+      const synopsis = anime.synopsis || anime.background || 'No synopsis available.';
+      const inList = isMovie ? Store.getMovies().some(m => Number(m.malId) === Number(malId)) : Store.hasTvShowByMalId(Number(malId));
+      overlayResults.innerHTML = `
+        <div class="overlay-mal-detail" data-mal-id="${Number(malId)}">
+          <button class="overlay-back-btn" type="button">← Back to results</button>
+          <div class="overlay-result-item" style="align-items:flex-start; cursor:default;">
+            ${poster ? `<img src="${poster}">` : `<img src="" style="background:var(--bg-3);">`}
+            <div class="overlay-result-info">
+              <div class="overlay-result-title">${esc(title)}</div>
+              <div class="overlay-result-sub">MAL Anime · ${esc(type)}${yr ? ` · ${yr}` : ''} · ${score}${eps ? ` · ${esc(eps)}` : ''}${status ? ` · ${esc(status)}` : ''}</div>
+              ${genres ? `<div class="overlay-result-sub">${esc(genres)}</div>` : ''}
+              <p class="overlay-result-sub" style="margin-top:10px; line-height:1.5; white-space:normal;">${esc(synopsis)}</p>
+              <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
+                ${inList ? `<button class="overlay-add-btn added" disabled>In List</button>` : `<button class="overlay-add-btn" data-action="detail-add">+ Add</button>`}
+                <button class="overlay-details-btn" data-action="open-mal-page">Open MAL ↗</button>
+              </div>
+            </div>
+            <span class="overlay-type-badge overlay-type-${isMovie ? 'movie' : 'tv'}">MAL</span>
+          </div>
+        </div>`;
+      const backBtn = overlayResults.querySelector('.overlay-back-btn');
+      if (backBtn) backBtn.addEventListener('click', () => overlayInput.dispatchEvent(new Event('input')));
+      const addBtn = overlayResults.querySelector('[data-action="detail-add"]');
+      if (addBtn) addBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        addBtn.disabled = true;
+        const oldText = addBtn.textContent;
+        addBtn.textContent = 'Adding...';
+        try {
+          const added = await overlayAddMalToList(Number(malId));
+          toast(`Added "${added.title}"`);
+          App.refreshCounts();
+          addBtn.textContent = 'In List';
+          addBtn.classList.add('added');
+        } catch (err) {
+          toast('Failed: ' + err.message);
+          addBtn.textContent = oldText;
+          addBtn.disabled = false;
+        }
+      });
+      const malPageBtn = overlayResults.querySelector('[data-action="open-mal-page"]');
+      if (malPageBtn) malPageBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        chrome.tabs.create({ url: `https://myanimelist.net/anime/${Number(malId)}` });
+      });
+    } catch (err) {
+      overlayResults.innerHTML = `<div class="overlay-msg" style="color:var(--dropped)">Error loading MAL details: ${esc(err.message)}</div>`;
+    }
+  }
+
+  function overlaySearchSubtype(result) {
+    const genreIds = Array.isArray(result.genre_ids) ? result.genre_ids : [];
+    const isAnimation = genreIds.includes(16);
+    if (result.media_type === 'tv') return isAnimation ? 'Animated / Anime TV' : 'Live Action TV';
+    if (result.media_type === 'movie') return isAnimation ? 'Animated Movie' : 'Movie';
+    return result.media_type || 'Media';
+  }
+
+
+  async function overlayBgFetch(url, options) {
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        return await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage({ type: 'fetch', url, options: options || {} }, response => {
+            if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+            if (!response) { reject(new Error('No response from background worker')); return; }
+            resolve(response);
+          });
+        });
+      } catch (_) { /* fall through */ }
+    }
+    const res = await fetch(url, options || {});
+    let body = null;
+    try { body = await res.json(); } catch (_) { body = await res.text(); }
+    return { ok: res.ok, status: res.status, body };
+  }
+
+  function overlayIsMalMovie(anime) { return String(anime?.type || '').toLowerCase() === 'movie'; }
+  function overlayMalPoster(anime) { return anime?.images?.webp?.image_url || anime?.images?.jpg?.image_url || anime?.image_url || ''; }
+  function overlayMalYear(anime) { return anime?.year || (anime?.aired?.from ? parseInt(String(anime.aired.from).substring(0, 4)) : 0) || 0; }
+  function overlayMalTitle(anime) { return anime?.title_english || anime?.title || anime?.title_japanese || 'Untitled'; }
+
+  async function overlaySearchMALAnime(query) {
+    if (!query || query.trim().length < 2) return [];
+    const url = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query.trim())}&limit=10&sfw=true&order_by=popularity&sort=asc`;
+    const res = await overlayBgFetch(url);
+    if (!res.ok) throw new Error(`MAL/Jikan ${res.status}`);
+    const data = res.body || {};
+    return (data.data || []).filter(a => a && a.mal_id).slice(0, 10);
+  }
+
+  async function overlayFetchMALAnimeFull(malId) {
+    const res = await overlayBgFetch(`https://api.jikan.moe/v4/anime/${malId}/full`);
+    if (!res.ok) throw new Error(`MAL/Jikan ${res.status}`);
+    return res.body?.data;
+  }
+
+  function overlayBlendRows(tmdbResults, malResults) {
+    const tmdbRows = (tmdbResults || []).map(r => ({ source: 'tmdb', data: r }));
+    const malRows = (malResults || []).map(r => ({ source: 'mal', data: r }));
+    const rows = [];
+    const max = Math.max(tmdbRows.length, malRows.length);
+    for (let i = 0; i < max; i += 1) {
+      if (tmdbRows[i]) rows.push(tmdbRows[i]);
+      if (malRows[i]) rows.push(malRows[i]);
+    }
+    return rows;
+  }
+
+  async function overlayAddMalToList(malId) {
+    const anime = await overlayFetchMALAnimeFull(malId);
+    if (!anime) throw new Error('MAL anime not found');
+    const isMovie = overlayIsMalMovie(anime);
+    const now = new Date().toISOString();
+    const title = overlayMalTitle(anime);
+    const poster = overlayMalPoster(anime);
+    const year = overlayMalYear(anime);
+    const score = anime.score || 0;
+    const genres = (anime.genres || []).map(g => g.name).filter(Boolean);
+    const common = {
+      tmdbId: -Math.abs(Number(malId)),
+      malId: Number(malId),
+      mediaKind: 'anime',
+      granularity: isMovie ? 'movie' : 'mal_entry',
+      externalIds: [{ provider: 'mal', providerType: 'anime', id: Number(malId), relation: 'primary' }],
+      title,
+      posterPath: poster,
+      backdropPath: anime.trailer?.images?.maximum_image_url || anime.trailer?.images?.large_image_url || null,
+      year,
+      voteAverage: score,
+      genres,
+      watchStatus: 'plan_to_watch',
+      rewatchCount: 0,
+      rewatchHistory: [],
+      startDate: '',
+      endDate: '',
+      dateAdded: now,
+      dateUpdated: now,
+      sourceTag: 'anime',
+      syncSource: 'mal-search',
+    };
+    if (isMovie) {
+      const runtimeMin = anime.duration ? (parseInt(String(anime.duration).match(/\d+/)?.[0] || '0') || 0) : 0;
+      Store.addMovie({ ...common, runtime: runtimeMin });
+      Store.addActivity({ tmdbId: common.tmdbId, malId: Number(malId), title, type: 'movie', posterPath: poster, action: 'added', detail: 'Added from MAL search overlay', timestamp: now });
+      return { type: 'movie', tmdbId: common.tmdbId, title };
+    }
+    const eps = Number(anime.episodes) || 0;
+    Store.addTvShow({
+      ...common,
+      totalSeasons: 1,
+      totalEpisodes: eps,
+      seasons: [{ seasonNumber: 1, episodeCount: eps, episodesWatched: 0, posterPath: poster }],
+    });
+    Store.addActivity({ tmdbId: common.tmdbId, malId: Number(malId), title, type: 'tv', posterPath: poster, action: 'added', detail: 'Added from MAL search overlay', timestamp: now });
+    return { type: 'tv', tmdbId: common.tmdbId, title };
+  }
+
+  async function overlayAddTmdbToList(tmdbId, mediaType) {
+    const now = new Date().toISOString();
+    if (mediaType === 'movie') {
+      const d = await TMDB.movieDetails(tmdbId);
+      Store.addMovie({
+        tmdbId: d.id,
+        mediaKind: 'movie',
+        granularity: 'movie',
+        externalIds: [{ provider: 'tmdb', providerType: 'movie', id: d.id, relation: 'same_as' }],
+        title: d.title,
+        posterPath: d.poster_path,
+        backdropPath: d.backdrop_path,
+        year: parseInt((d.release_date || '').substring(0, 4)) || 0,
+        voteAverage: d.vote_average || 0,
+        imdbId: d.imdb_id || '',
+        runtime: d.runtime || 0,
+        genres: (d.genres || []).map(g => g.name),
+        watchStatus: 'plan_to_watch',
+        rewatchCount: 0,
+        rewatchHistory: [],
+        startDate: '',
+        endDate: '',
+        dateAdded: now,
+        dateUpdated: now,
+        sourceTag: 'tmdb',
+      });
+      Store.addActivity({ tmdbId: d.id, title: d.title, type: 'movie', posterPath: d.poster_path, action: 'added', detail: 'Added from search overlay', timestamp: now });
+      return d;
+    }
+    const d = await TMDB.tvDetails(tmdbId);
+    const ss = (d.seasons || []).filter(s => s.season_number > 0);
+    Store.addTvShow({
+      tmdbId: d.id,
+      mediaKind: 'tv',
+      granularity: 'series',
+      externalIds: [{ provider: 'tmdb', providerType: 'tv', id: d.id, relation: 'same_as' }],
+      title: d.name,
+      posterPath: d.poster_path,
+      backdropPath: d.backdrop_path,
+      year: parseInt((d.first_air_date || '').substring(0, 4)) || 0,
+      voteAverage: d.vote_average || 0,
+      imdbId: d.external_ids?.imdb_id || '',
+      totalSeasons: d.number_of_seasons || 0,
+      totalEpisodes: d.number_of_episodes || 0,
+      genres: (d.genres || []).map(g => g.name),
+      watchStatus: 'plan_to_watch',
+      rewatchCount: 0,
+      rewatchHistory: [],
+      startDate: '',
+      endDate: '',
+      seasons: ss.map(s => ({ seasonNumber: s.season_number, episodeCount: s.episode_count || 0, episodesWatched: 0, posterPath: s.poster_path })),
+      dateAdded: now,
+      dateUpdated: now,
+      sourceTag: 'tmdb',
+    });
+    Store.addActivity({ tmdbId: d.id, title: d.name, type: 'tv', posterPath: d.poster_path, action: 'added', detail: 'Added from search overlay', timestamp: now });
+    return d;
+  }
 
   sidebarInput.addEventListener('focus', () => { openSearch(); sidebarInput.blur(); });
 
@@ -200,72 +543,123 @@ document.addEventListener('DOMContentLoaded', async () => {
   overlayInput.addEventListener('input', () => {
     clearTimeout(searchTimeout);
     const query = overlayInput.value.trim();
-    if (!query) { overlayResults.innerHTML = '<div class="overlay-msg">Type to search TMDB for movies and TV shows</div>'; return; }
-    if (!TMDB.getKey()) { overlayResults.innerHTML = '<div class="overlay-msg">Set your TMDB API key in Settings first</div>'; return; }
-    overlayResults.innerHTML = '<div class="overlay-msg">Searching...</div>';
+    if (!query) { overlayResults.innerHTML = '<div class="overlay-msg">Type to search TMDB + MAL</div>'; return; }
+    overlayResults.innerHTML = '<div class="overlay-msg">Searching TMDB + MAL...</div>';
 
     searchTimeout = setTimeout(async () => {
       try {
-        const results = await TMDB.search(query);
-        if (!results.length) { overlayResults.innerHTML = '<div class="overlay-msg">No results found</div>'; return; }
+        const [tmdbRes, malRes] = await Promise.allSettled([
+          TMDB.getKey() ? TMDB.search(query) : Promise.resolve([]),
+          overlaySearchMALAnime(query),
+        ]);
+        const tmdbResults = tmdbRes.status === 'fulfilled' ? tmdbRes.value : [];
+        const malResults = malRes.status === 'fulfilled' ? malRes.value : [];
+        const rows = overlayBlendRows(tmdbResults, malResults);
 
-        overlayResults.innerHTML = results.slice(0, 10).map(r => {
+        if (!rows.length) {
+          const tmdbErr = tmdbRes.status === 'rejected' ? tmdbRes.reason?.message : '';
+          const malErr = malRes.status === 'rejected' ? malRes.reason?.message : '';
+          const errText = [tmdbErr, malErr].filter(Boolean).join(' · ');
+          overlayResults.innerHTML = `<div class="overlay-msg">No results found${errText ? ` (${esc(errText)})` : ''}</div>`;
+          return;
+        }
+
+        overlayResults.innerHTML = rows.slice(0, 16).map(row => {
+          if (row.source === 'mal') {
+            const r = row.data;
+            const malId = Number(r.mal_id);
+            const isMovie = overlayIsMalMovie(r);
+            const title = overlayMalTitle(r);
+            const yr = overlayMalYear(r) || '';
+            const poster = overlayMalPoster(r);
+            const score = r.score ? ` · ${Number(r.score).toFixed(1)}` : '';
+            const eps = !isMovie && r.episodes ? ` · ${r.episodes} eps` : '';
+            const inList = isMovie ? Store.getMovies().some(m => Number(m.malId) === malId) : Store.hasTvShowByMalId(malId);
+            return `
+              <div class="overlay-result-item" data-source="mal" data-mal-id="${malId}">
+                ${poster ? `<img src="${poster}">` : `<img src="" style="background:var(--bg-3);">`}
+                <div class="overlay-result-info">
+                  <div class="overlay-result-title">${esc(title)}</div>
+                  <div class="overlay-result-sub">MAL Anime · ${esc(r.type || (isMovie ? 'Movie' : 'TV'))}${yr ? ` · ${yr}` : ''}${score}${eps}</div>
+                </div>
+                <span class="overlay-type-badge overlay-type-${isMovie ? 'movie' : 'tv'}">MAL</span>
+                <div class="overlay-result-actions">
+                  ${inList ? `<button class="overlay-add-btn added" disabled>In List</button>` : `<button class="overlay-add-btn" data-action="quick-add">+ Add</button>`}
+                </div>
+              </div>`;
+          }
+
+          const r = row.data;
           const isM = r.media_type === 'movie';
           const title = isM ? r.title : r.name;
           const date = isM ? r.release_date : r.first_air_date;
           const yr = (date || '').substring(0, 4);
           const poster = TMDB.poster(r.poster_path, 'w92');
           const inList = isM ? Store.hasMovie(r.id) : Store.hasTvShow(r.id);
+          const subtype = overlaySearchSubtype(r);
           return `
-            <div class="overlay-result-item" data-id="${r.id}" data-type="${r.media_type}">
+            <div class="overlay-result-item" data-source="tmdb" data-id="${r.id}" data-type="${r.media_type}">
               ${poster ? `<img src="${poster}">` : `<img src="" style="background:var(--bg-3);">`}
               <div class="overlay-result-info">
                 <div class="overlay-result-title">${esc(title)}</div>
-                <div class="overlay-result-sub">${yr}${r.vote_average ? ` · ${r.vote_average.toFixed(1)}` : ''}</div>
+                <div class="overlay-result-sub">TMDB · ${yr}${r.vote_average ? ` · ${r.vote_average.toFixed(1)}` : ''} · ${esc(subtype)}</div>
               </div>
               <span class="overlay-type-badge overlay-type-${isM ? 'movie' : 'tv'}">${isM ? 'Movie' : 'TV'}</span>
-              ${inList ? `<button class="overlay-add-btn added" disabled>In List</button>` : `<button class="overlay-add-btn" data-action="quick-add">+ Add</button>`}
+              <div class="overlay-result-actions">
+                ${inList ? `<button class="overlay-add-btn added" disabled>In List</button>` : `<button class="overlay-add-btn" data-action="quick-add">+ Add</button>`}
+              </div>
             </div>`;
         }).join('');
 
         overlayResults.querySelectorAll('.overlay-result-item').forEach(item => {
+          const source = item.dataset.source;
+          const openDetails = () => {
+            if (source === 'mal') {
+              const malId = parseInt(item.dataset.malId);
+              const seed = rows.find(row => row.source === 'mal' && Number(row.data?.mal_id) === malId)?.data || null;
+              openOverlayMALInDetail(malId, seed);
+              return;
+            }
+            App.setDetailReturnContext({ type: 'search', query: overlayInput.value.trim() });
+            closeSearch({ keepQuery: true });
+            DetailUI.open(parseInt(item.dataset.id), item.dataset.type);
+          };
+
+
           const addBtn = item.querySelector('[data-action="quick-add"]');
           if (addBtn) {
             addBtn.addEventListener('click', async (e) => {
               e.stopPropagation();
-              const id = parseInt(item.dataset.id), type = item.dataset.type;
+              addBtn.disabled = true;
+              const oldText = addBtn.textContent;
+              addBtn.textContent = 'Adding...';
               try {
-                if (type === 'movie') {
-                  const d = await TMDB.movieDetails(id);
-                  Store.addMovie({ tmdbId: d.id, title: d.title, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.release_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, runtime: d.runtime || 0, genres: (d.genres || []).map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
-                  Store.addActivity({ tmdbId: d.id, title: d.title, type: 'movie', posterPath: d.poster_path, action: 'added', detail: 'Added to list', timestamp: new Date().toISOString() });
-                  toast(`Added "${d.title}"`);
-                } else {
-                  const d = await TMDB.tvDetails(id);
-                  const ss = (d.seasons || []).filter(s => s.season_number > 0);
-                  Store.addTvShow({ tmdbId: d.id, title: d.name, posterPath: d.poster_path, backdropPath: d.backdrop_path, year: parseInt((d.first_air_date || '').substring(0, 4)) || 0, voteAverage: d.vote_average || 0, totalSeasons: d.number_of_seasons || 0, totalEpisodes: d.number_of_episodes || 0, genres: (d.genres || []).map(g => g.name), watchStatus: 'plan_to_watch', rewatchCount: 0, rewatchHistory: [], startDate: '', endDate: '', seasons: ss.map(s => ({ seasonNumber: s.season_number, episodeCount: s.episode_count || 0, episodesWatched: 0, posterPath: s.poster_path })), dateAdded: new Date().toISOString(), dateUpdated: new Date().toISOString() });
-                  Store.addActivity({ tmdbId: d.id, title: d.name, type: 'tv', posterPath: d.poster_path, action: 'added', detail: 'Added to list', timestamp: new Date().toISOString() });
-                  toast(`Added "${d.name}"`);
-                }
+                const added = source === 'mal'
+                  ? await overlayAddMalToList(parseInt(item.dataset.malId))
+                  : await overlayAddTmdbToList(parseInt(item.dataset.id), item.dataset.type);
+                toast(`Added "${added.title || added.name}"`);
                 App.refreshCounts();
                 addBtn.textContent = 'In List'; addBtn.classList.add('added'); addBtn.disabled = true;
-              } catch (err) { toast('Failed: ' + err.message); }
+              } catch (err) {
+                toast('Failed: ' + err.message);
+                addBtn.textContent = oldText;
+                addBtn.disabled = false;
+              }
             });
           }
           item.addEventListener('click', (e) => {
-            if (e.target.closest('[data-action="quick-add"]')) return;
-            closeSearch();
-            DetailUI.open(parseInt(item.dataset.id), item.dataset.type);
+            if (e.target.closest('button')) return;
+            openDetails();
           });
         });
-      } catch (err) { overlayResults.innerHTML = `<div class="overlay-msg" style="color:var(--dropped)">Error: ${err.message}</div>`; }
+      } catch (err) { overlayResults.innerHTML = `<div class="overlay-msg" style="color:var(--dropped)">Error: ${esc(err.message)}</div>`; }
     }, 350);
   });
 
   // ─── Settings ───
-  document.getElementById('settingsBtn').addEventListener('click', () => document.getElementById('settingsModal').classList.remove('hidden'));
-  document.getElementById('closeSettings').addEventListener('click', () => document.getElementById('settingsModal').classList.add('hidden'));
-  document.getElementById('settingsModal').addEventListener('click', (e) => { if (e.target.id === 'settingsModal') document.getElementById('settingsModal').classList.add('hidden'); });
+  document.getElementById('settingsBtn').addEventListener('click', () => { history.replaceState(null, '', '#settings'); document.getElementById('settingsModal').classList.remove('hidden'); });
+  document.getElementById('closeSettings').addEventListener('click', () => { document.getElementById('settingsModal').classList.add('hidden'); history.replaceState(null, '', App._pageHash(currentView || 'watchlist')); });
+  document.getElementById('settingsModal').addEventListener('click', (e) => { if (e.target.id === 'settingsModal') { document.getElementById('settingsModal').classList.add('hidden'); history.replaceState(null, '', App._pageHash(currentView || 'watchlist')); } });
 
   document.getElementById('saveApiKey').addEventListener('click', () => {
     const k = document.getElementById('apiKeyInput').value.trim();
@@ -281,30 +675,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     toast('TMDB API key cleared');
   });
 
-  const saveOmdbBtn = document.getElementById('saveOmdbKey');
-  if (saveOmdbBtn) saveOmdbBtn.addEventListener('click', () => {
-    const k = document.getElementById('omdbKeyInput').value.trim();
-    Store.setOmdbKey(k);
-    if (window.OMDB) OMDB.setKey(k);
-    chrome.storage.local.set({ omdbKey: k }, () => toast(k ? 'OMDb key saved!' : 'OMDb key cleared'));
-  });
-
-  const clearOmdbBtn = document.getElementById('clearOmdbKey');
-  if (clearOmdbBtn) clearOmdbBtn.addEventListener('click', () => {
-    Store.setOmdbKey('');
-    if (window.OMDB) OMDB.setKey('');
-    document.getElementById('omdbKeyInput').value = '';
-    chrome.storage.local.remove(['omdbKey', 'omdbCache'], () => toast('OMDb key and cache cleared'));
-  });
-
   document.getElementById('toggleKeyVis').addEventListener('click', () => {
     const inp = document.getElementById('apiKeyInput');
-    inp.type = inp.type === 'password' ? 'text' : 'password';
-  });
-
-  const toggleOmdbBtn = document.getElementById('toggleOmdbKeyVis');
-  if (toggleOmdbBtn) toggleOmdbBtn.addEventListener('click', () => {
-    const inp = document.getElementById('omdbKeyInput');
     inp.type = inp.type === 'password' ? 'text' : 'password';
   });
 
