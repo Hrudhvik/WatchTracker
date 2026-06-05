@@ -366,16 +366,22 @@ function hidePopupSearchPage() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   watchThemeAwareSvgIcons();
-  await Store.load();
-  const apiKey = Store.getApiKey();
-  if (apiKey) TMDB.setKey(apiKey);
-  applyPopupTheme();
-  injectPopupDashboardShortcutStyles();
-  keepPopupDashboardButtonMounted();
-  cleanupPopupFooterDashboardButtons();
-  restorePrefs();
-  renderList();
-  hidePopupSearchPage();
+  try {
+    await Store.load();
+    const apiKey = Store.getApiKey();
+    if (apiKey) TMDB.setKey(apiKey);
+    applyPopupTheme();
+    injectPopupDashboardShortcutStyles();
+    keepPopupDashboardButtonMounted();
+    cleanupPopupFooterDashboardButtons();
+    restorePrefs();
+    renderList();
+    hidePopupSearchPage();
+  } finally {
+    // Avoid first-paint flicker: keep the popup hidden until saved state,
+    // preferences, theme, dashboard/header cleanup, and the first render are applied.
+    document.documentElement.classList.remove('app-pending');
+  }
 
   bindPopupBrandDashboardShortcut();
   document.getElementById('pSettings')?.addEventListener('click', () => enterPopupSettingsMode());

@@ -22,8 +22,8 @@
   --pdropped: #e17055;
 }
 
-html.theme-pending { background: var(--pbg-0, var(--bg-0, #08090c)); }
-html.theme-pending body { visibility: hidden; }
+html.theme-pending, html.app-pending { background: var(--pbg-0, var(--bg-0, #08090c)); }
+html.theme-pending body, html.app-pending body { visibility: hidden; }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body {
