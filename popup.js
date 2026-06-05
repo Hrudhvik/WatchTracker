@@ -149,6 +149,190 @@ let pSearchTimeout = null;
 let pLastSearchQuery = '';
 let pRecCache = { html: '', summary: '', filters: null, results: [] };
 
+function openFullDashboardFromPopup(ev) {
+  if (ev) {
+    ev.preventDefault?.();
+    ev.stopPropagation?.();
+  }
+  const url = chrome.runtime.getURL('app.html');
+  try {
+    chrome.tabs.create({ url, active: true }, () => {
+      try { window.close(); } catch (_) {}
+    });
+  } catch (_) {
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => { try { window.close(); } catch (__) {} }, 80);
+  }
+}
+
+function popupDashboardShortcutHTML(label = 'Open full dashboard') {
+  // Dashboard access now lives in the main popup header, next to the brand.
+  // Keep this helper as a no-op so older modal/header render calls do not
+  // inject duplicate dashboard buttons.
+  return '';
+}
+
+function injectPopupDashboardShortcutStyles() {
+  if (document.getElementById('popupDashboardShortcutStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'popupDashboardShortcutStyles';
+  style.textContent = `
+    .popup-dashboard-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+    .popup-dashboard-header>div:first-child{min-width:0;}
+    .pis-head.popup-dashboard-header,.pr-head.popup-dashboard-header,.p-lineup-head.popup-dashboard-header,.pdl-header.popup-dashboard-header{align-items:center;}
+
+    /* Main popup header dashboard shortcut beside the WatchTracker brand.
+       Match the existing square header icon buttons. */
+    .p-brand-dashboard-wrap{
+      display:inline-flex;align-items:center;gap:8px;min-width:0;margin-right:auto;
+    }
+    .p-brand-dashboard-wrap #pOpenTab,
+    #pOpenTab{
+      display:inline-flex;align-items:center;gap:9px;min-width:0;
+    }
+    #pDashboardBtn,
+    #pDashboardBtn.p-top-dashboard-btn,
+    .p-brand-dashboard-wrap > #pDashboardBtn.p-top-dashboard-btn{
+      box-sizing:border-box !important;
+      inline-size:28px !important;block-size:28px !important;
+      width:28px !important;height:28px !important;
+      min-width:28px !important;max-width:28px !important;
+      min-height:28px !important;max-height:28px !important;
+      flex:0 0 28px !important;align-self:center !important;
+      padding:0 !important;margin:0 !important;
+      border-radius:7px !important;border:1px solid rgba(148,163,184,.20) !important;
+      display:inline-flex !important;align-items:center !important;justify-content:center !important;
+      background:var(--pbg-2,rgba(17,21,31,.96)) !important;color:var(--ptext-1,#d2d7e2) !important;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.045) !important;cursor:pointer;
+      line-height:0 !important;appearance:none !important;-webkit-appearance:none !important;
+      transform:none !important;filter:none !important;overflow:hidden !important;
+      transition:background .15s ease,border-color .15s ease,color .15s ease,transform .15s ease;
+    }
+    #pDashboardBtn.p-top-dashboard-btn img,
+    #pDashboardBtn.p-top-dashboard-btn svg,
+    #pDashboardBtn.p-top-dashboard-btn .themed-svg-icon{
+      width:17px !important;height:17px !important;display:block !important;flex:0 0 17px !important;
+    }
+    #pDashboardBtn.p-top-dashboard-btn svg,
+    #pDashboardBtn.p-top-dashboard-btn svg *{
+      stroke:currentColor !important;fill:none !important;stroke-width:1.6 !important;
+      stroke-linecap:round !important;stroke-linejoin:round !important;
+    }
+    #pDashboardBtn.p-top-dashboard-btn:hover{
+      background:var(--pbg-3,rgba(24,29,42,.98)) !important;border-color:var(--paccent,#8B5CF6) !important;color:var(--ptext-0,#f5f7fb) !important;
+    }
+    #pDashboardBtn.p-top-dashboard-btn:active{transform:scale(.98) !important;}
+    #pDashboardBtn.p-top-dashboard-btn:focus-visible{outline:2px solid var(--paccent,#8B5CF6);outline-offset:2px;}
+  `;
+  document.head.appendChild(style);
+}
+
+function bindPopupDashboardShortcuts(root = document) {
+  // Dashboard access is only the top header ↗ button.
+}
+
+function popupDashboardIconHTML() {
+  // Inline the external-link arrow so it inherits the active popup theme via currentColor.
+  // Keeping this inline avoids fixed-color SVG rendering that can happen with <img> icons.
+  return `
+    <svg class="themed-svg-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M13 5h6v6" />
+      <path d="M19 5 10 14" />
+      <path d="M18 14v4.2a1.8 1.8 0 0 1-1.8 1.8H6.8A1.8 1.8 0 0 1 5 18.2V8.8A1.8 1.8 0 0 1 6.8 7H11" />
+    </svg>`;
+}
+
+function findPopupBrandElement() {
+  const byId = document.getElementById('pOpenTab');
+  if (byId) return byId;
+
+  // Fallback for builds where the brand id changed: find the smallest header
+  // element that visibly contains the WatchTracker title.
+  const candidates = Array.from(document.querySelectorAll('button,a,div,span'))
+    .filter(el => /watchtracker/i.test((el.textContent || '').trim()))
+    .sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+  return candidates[0] || null;
+}
+
+function initPopupTopDashboardButton() {
+  const brand = findPopupBrandElement();
+  if (!brand) return false;
+
+  // Remove old/experimental dashboard triggers and avoid duplicates.
+  document.querySelectorAll('#pDashboardBtn, .p-brand-dashboard-shortcut, .popup-dashboard-shortcut').forEach(el => el.remove());
+
+  brand.removeAttribute('role');
+  brand.removeAttribute('tabindex');
+  brand.removeAttribute('aria-label');
+  brand.removeAttribute('title');
+
+  const btn = document.createElement('button');
+  btn.id = 'pDashboardBtn';
+  const referenceHeaderButton = document.getElementById('pSearchBtn') || document.getElementById('pLineupBtn') || document.getElementById('pDiaryBtn') || document.getElementById('pSettings');
+  const referenceClasses = referenceHeaderButton
+    ? Array.from(referenceHeaderButton.classList).filter(c => !['hidden','active','selected'].includes(c)).join(' ')
+    : '';
+  btn.className = `${referenceClasses} p-top-dashboard-btn`.trim();
+  btn.type = 'button';
+  btn.title = 'Open full dashboard';
+  btn.setAttribute('aria-label', 'Open full dashboard');
+  btn.innerHTML = popupDashboardIconHTML();
+  btn.addEventListener('click', openFullDashboardFromPopup);
+
+  // Put the button immediately beside the Logo / WatchTracker brand.
+  let wrap = brand.closest?.('.p-brand-dashboard-wrap');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.className = 'p-brand-dashboard-wrap';
+    brand.parentNode.insertBefore(wrap, brand);
+    wrap.appendChild(brand);
+  }
+  wrap.appendChild(btn);
+  initThemeAwareSvgIcons(wrap);
+
+  return true;
+}
+
+function keepPopupDashboardButtonMounted() {
+  let attempts = 0;
+  const ensure = () => {
+    attempts += 1;
+    initPopupTopDashboardButton();
+    if (!document.getElementById('pDashboardBtn') && attempts < 8) setTimeout(ensure, 120);
+  };
+  ensure();
+
+  const observer = new MutationObserver(() => {
+    if (!document.getElementById('pDashboardBtn')) initPopupTopDashboardButton();
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
+function bindPopupBrandDashboardShortcut() {
+  // The logo/title are decorative in the popup. Use #pDashboardBtn to open the full dashboard.
+}
+
+function cleanupPopupFooterDashboardButtons() {
+  // Dashboard access now lives in the brand/header area, so remove legacy
+  // bottom dashboard CTAs that may still be present in popup.html.
+  document.querySelectorAll('.p-footer button, .p-footer a').forEach(el => {
+    const text = (el.textContent || '').trim().toLowerCase();
+    const meta = `${el.id || ''} ${el.className || ''} ${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''}`.toLowerCase();
+    const isDashboardAction = text.includes('open full dashboard')
+      || text === '↗'
+      || text === 'dashboard ↗'
+      || meta.includes('dashboard');
+    if (isDashboardAction) el.remove();
+  });
+  document.querySelectorAll('.p-footer').forEach(footer => {
+    const visibleChildren = Array.from(footer.children).filter(child => {
+      const style = window.getComputedStyle(child);
+      return style.display !== 'none' && style.visibility !== 'hidden' && (child.textContent || '').trim();
+    });
+    if (!visibleChildren.length) footer.classList.add('hidden');
+  });
+}
+
 function setPopupModeTabs(mode) {
   const switcher = document.getElementById('pModeSwitch');
   const lib = document.getElementById('pModeLibrary');
@@ -186,16 +370,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   const apiKey = Store.getApiKey();
   if (apiKey) TMDB.setKey(apiKey);
   applyPopupTheme();
+  injectPopupDashboardShortcutStyles();
+  keepPopupDashboardButtonMounted();
+  cleanupPopupFooterDashboardButtons();
   restorePrefs();
   renderList();
   hidePopupSearchPage();
 
-  document.getElementById('pOpenTab').addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('app.html') }); window.close();
-  });
-  document.getElementById('pSettings').addEventListener('click', () => enterPopupSettingsMode());
-  document.getElementById('pClose').addEventListener('click', () => window.close());
-  document.getElementById('pSearchBtn').addEventListener('click', () => enterTMDBMode(true, pSearchSource || 'tmdb'));
+  bindPopupBrandDashboardShortcut();
+  document.getElementById('pSettings')?.addEventListener('click', () => enterPopupSettingsMode());
+  document.getElementById('pClose')?.addEventListener('click', () => window.close());
+  document.getElementById('pSearchBtn')?.addEventListener('click', () => enterTMDBMode(true, pSearchSource || 'tmdb'));
   document.getElementById('pLineupBtn')?.addEventListener('click', () => enterLineupMode());
 
   const pModeLibrary = document.getElementById('pModeLibrary');
@@ -206,7 +391,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (pModeAnime) pModeAnime.addEventListener('click', () => enterTMDBMode(true, 'mal'));
 
   // Diary view
-  document.getElementById('pDiaryBtn').addEventListener('click', () => enterDiaryMode());
+  document.getElementById('pDiaryBtn')?.addEventListener('click', () => enterDiaryMode());
   document.getElementById('pRecBtn')?.addEventListener('click', () => enterRecommendationsMode());
 
   // Back — returns to the previous popup view when possible
@@ -410,6 +595,7 @@ function closeSortDD() {
 
 function goBackToList() {
   document.querySelector('.p-footer')?.classList.remove('hidden');
+  cleanupPopupFooterDashboardButtons();
   document.getElementById('pInlineSettings')?.classList.add('hidden');
   document.getElementById('pList')?.classList.remove('hidden');
   pMode = 'list';
@@ -486,7 +672,7 @@ function renderPopupLineup() {
     el.innerHTML = '<div class="p-search-msg">Your Lineup is empty. Open a title and tap Add to Lineup.</div>';
     return;
   }
-  el.innerHTML = `<div class="p-lineup-wrap"><div class="p-lineup-head"><div class="pd-title">Lineup</div><div class="pd-sub">What you are watching next · drag to reorder</div></div><div class="p-lineup-list">${lineup.map((entry, idx) => {
+  el.innerHTML = `<div class="p-lineup-wrap"><div class="p-lineup-head popup-dashboard-header"><div><div class="pd-title">Lineup</div><div class="pd-sub">What you are watching next · drag to reorder</div></div>${popupDashboardShortcutHTML()}</div><div class="p-lineup-list">${lineup.map((entry, idx) => {
     const item = Store._lineupMediaFor ? Store._lineupMediaFor(entry) : null;
     const poster = TMDB.poster((item && item.posterPath) || entry.posterPath, 'w92');
     const title = esc((item && item.title) || entry.title || 'Untitled');
@@ -515,6 +701,7 @@ function renderPopupLineup() {
       <button class="p-lineup-remove p-trash-btn" type="button" title="Remove from Lineup" aria-label="Remove from Lineup"><img src="icons/trash.svg" alt=""></button>
     </div>`;
   }).join('')}</div></div>`;
+  bindPopupDashboardShortcuts(el);
   const listEl = el.querySelector('.p-lineup-list');
   const updateRanks = () => {
     listEl?.querySelectorAll('.p-lineup-card').forEach((node, i) => {
@@ -710,18 +897,21 @@ function enterRecommendationsMode(reset = false) {
   const el = document.getElementById('pList');
   if (!reset && pRecCache.html) {
     el.innerHTML = pRecCache.html;
+    bindPopupDashboardShortcuts(el);
     bindPopupRecommendationEvents();
     return;
   }
   el.innerHTML = popupRecommendationShell();
+  bindPopupDashboardShortcuts(el);
   bindPopupRecommendationEvents();
 }
 
 function popupRecommendationShell() {
   const languageOptions = POPUP_REC_LANGUAGES.map(([code, name]) => `<option value="${esc(name)} (${esc(code)})"></option>`).join('');
   return `<div class="pr-wrap">
-    <div class="pr-head">
+    <div class="pr-head popup-dashboard-header">
       <div><div class="pr-title">Recommendations</div><div class="pr-sub">Quick picks from your tracker or TMDB.</div></div>
+      ${popupDashboardShortcutHTML()}
     </div>
     <div class="pr-panel">
       <div class="pr-row"><label>Source</label><select id="prSource"><option value="new">Something new</option><option value="plan_to_watch">From Plan to Watch</option><option value="completed">From Completed</option><option value="library">From My Library</option></select></div>
@@ -1861,7 +2051,7 @@ function popupDiaryLogModal(tmdbId, mediaType, title, posterPath) {
     return `<div class="pdl-hrow"><div class="pdl-hinfo"><span class="pdl-hdate">${de.date || '—'}</span> <span class="pdl-hact">${a}${s}${r}</span></div><button class="pdl-hedit" data-ts="${de.timestamp}">Edit</button><button class="pdl-hdel" data-tmdb="${de.tmdbId}" data-ts="${de.timestamp}">Remove</button></div>`;
   }).join('')}</div>` : '';
 
-  const html = `<div class="pdl-overlay" id="pdlModal"><div class="pdl-box"><div class="pdl-header"><span>Log Diary</span><button class="pdl-close" id="pdlX">&#10005;</button></div><div class="pdl-body">
+  const html = `<div class="pdl-overlay" id="pdlModal"><div class="pdl-box"><div class="pdl-header popup-dashboard-header"><span>Log Diary</span>${popupDashboardShortcutHTML()}<button class="pdl-close" id="pdlX">&#10005;</button></div><div class="pdl-body">
     <div class="pdl-hero"><div class="pdl-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">${isM ? 'MOV' : 'TV'}</div>`}</div><div><div class="pdl-name">${esc(title)}</div></div></div>
     <div class="pdl-form">
       <div class="pdl-row"><label>Date</label><input type="date" id="pdlDate" value="${today}" class="pdl-inp"></div>
@@ -1879,6 +2069,7 @@ function popupDiaryLogModal(tmdbId, mediaType, title, posterPath) {
   document.body.insertAdjacentHTML('beforeend', html);
   const m = document.getElementById('pdlModal');
   const close = () => m.remove();
+  bindPopupDashboardShortcuts(m);
   m.querySelector('#pdlX').addEventListener('click', close);
   m.addEventListener('click', e => { if (e.target === m) close(); });
 
@@ -1903,7 +2094,7 @@ function popupEditDiaryEntry(timestamp) {
   if (!entry) return;
   const isM = entry.type === 'movie';
 
-  const html = `<div class="pdl-overlay" id="pdleModal"><div class="pdl-box"><div class="pdl-header"><span>Edit Entry</span><button class="pdl-close" id="pdleX">&#10005;</button></div><div class="pdl-body"><div class="pdl-form">
+  const html = `<div class="pdl-overlay" id="pdleModal"><div class="pdl-box"><div class="pdl-header popup-dashboard-header"><span>Edit Entry</span>${popupDashboardShortcutHTML()}<button class="pdl-close" id="pdleX">&#10005;</button></div><div class="pdl-body"><div class="pdl-form">
     <div class="pdl-row"><label>Date</label><input type="date" id="pdleDate" value="${entry.date || ''}" class="pdl-inp"></div>
     <div class="pdl-row2">
       <div class="pdl-row" style="flex:1;"><label>Action</label><select id="pdleAction" class="pdl-inp"><option value="watched" ${entry.action === 'watched' ? 'selected' : ''}>Watched</option><option value="rewatch" ${entry.action === 'rewatch' ? 'selected' : ''}>Rewatched</option></select></div>
@@ -1916,6 +2107,7 @@ function popupEditDiaryEntry(timestamp) {
   document.body.insertAdjacentHTML('beforeend', html);
   const m = document.getElementById('pdleModal');
   const close = () => m.remove();
+  bindPopupDashboardShortcuts(m);
   m.querySelector('#pdleX').addEventListener('click', close);
   m.querySelector('#pdleBack').addEventListener('click', () => { close(); if (pMode === 'diary') renderPopupDiary(); });
 
@@ -2011,7 +2203,6 @@ function enterPopupSettingsMode() {
         <div id="pisCustomTheme" class="pis-custom-theme ${themeValue === 'custom' ? '' : 'hidden'}">
           <div class="pis-color-row"><label>Background<input id="pisBg" type="color" value="${esc(c.bg0 || '#130F1C')}"></label><label>Surface<input id="pisSurface" type="color" value="${esc(c.bg2 || '#1E182D')}"></label></div>
           <div class="pis-color-row"><label>Accent<input id="pisAccent" type="color" value="${esc(c.accent || '#8B5CF6')}"></label><label>Text<input id="pisText" type="color" value="${esc(c.text0 || '#F8F8F2')}"></label></div>
-          <button id="pisApplyCustom" type="button" class="pis-secondary-full">Apply custom theme</button>
         </div>
       </div>
 
@@ -2034,9 +2225,10 @@ function enterPopupSettingsMode() {
       </div>
 
       <div id="pisStatus" class="pis-status"></div>
-      <div class="pis-footer"><button id="pisOpenFull" type="button">More Settings</button><span></span><button id="pisOpenDashboard" type="button">Open Full Dashboard ↗</button></div>
-      <div class="pis-actions"><button id="pisSave">Save</button></div>
+      <div class="pis-footer pis-footer-single"><button id="pisOpenFull" type="button">More Settings</button></div>
     </div>`;
+
+    bindPopupDashboardShortcuts(panel);
 
     const applyCustomFromPopup = () => {
       const vars = popupCustomThemeVars({
@@ -2067,13 +2259,13 @@ function enterPopupSettingsMode() {
       if (panel.querySelector('#pisTheme')?.value === 'custom') applyCustomFromPopup();
     }));
 
-    panel.querySelector('#pisSave').addEventListener('click', () => {
+    panel.querySelector('#pisInterval').addEventListener('change', () => {
       chrome.storage.local.set({ syncConfig: {
         ...syncConfig,
         syncInterval: Number(panel.querySelector('#pisInterval').value || 0),
       }}, () => {
         chrome.runtime.sendMessage({ type: 'watchtracker:refresh-sync-alarm' }, () => {});
-        panel.querySelector('#pisStatus').textContent = 'Saved. Auto-sync schedule refreshed.';
+        panel.querySelector('#pisStatus').textContent = 'Auto-sync interval saved.';
       });
     });
 
@@ -2092,9 +2284,7 @@ function enterPopupSettingsMode() {
     panel.querySelector('#pisOpenFull').addEventListener('click', () => {
       chrome.tabs.create({ url: chrome.runtime.getURL('app.html') + '#settings' }); window.close();
     });
-    panel.querySelector('#pisOpenDashboard')?.addEventListener('click', () => {
-      chrome.tabs.create({ url: chrome.runtime.getURL('app.html') }); window.close();
-    });
+    bindPopupDashboardShortcuts(panel);
   });
 }
 

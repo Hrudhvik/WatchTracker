@@ -65,6 +65,100 @@ function esc(str) {
   return el.innerHTML;
 }
 
+
+function enhanceThemePresetThumbnails() {
+  const presets = {
+    midnight: { bg0:'#08090c', bg1:'#0e1015', bg2:'#151820', bg3:'#1c2030', accent:'#6c5ce7', accentL:'#a29bfe', text:'#f5f7fb' },
+    oled:     { bg0:'#000000', bg1:'#060606', bg2:'#111111', bg3:'#1b1b1b', accent:'#d1d5db', accentL:'#f3f4f6', text:'#e5e5e5' },
+    ocean:    { bg0:'#090e17', bg1:'#0f1623', bg2:'#151e2f', bg3:'#1c273c', accent:'#38bdf8', accentL:'#7dd3fc', text:'#e2e8f0' },
+    nord:     { bg0:'#2e3440', bg1:'#3b4252', bg2:'#434c5e', bg3:'#4c566a', accent:'#88c0d0', accentL:'#8fbcbb', text:'#eceff4' },
+    sakura:   { bg0:'#170f14', bg1:'#23161e', bg2:'#2d1b26', bg3:'#3a2231', accent:'#f472b6', accentL:'#fbcfe8', text:'#fae8f0' },
+    matcha:   { bg0:'#222622', bg1:'#2b302b', bg2:'#343a34', bg3:'#404740', accent:'#a3e635', accentL:'#d9f99d', text:'#e6ebe6' },
+    cloud:    { bg0:'#f8fafc', bg1:'#f1f5f9', bg2:'#e2e8f0', bg3:'#cbd5e1', accent:'#3b82f6', accentL:'#93c5fd', text:'#0f172a' },
+    latte:    { bg0:'#faf4ed', bg1:'#f3e8da', bg2:'#e6d5c3', bg3:'#d4bca4', accent:'#d97706', accentL:'#f59e0b', text:'#453a35' },
+  };
+
+  if (!document.getElementById('themePresetThumbnailStyles')) {
+    const style = document.createElement('style');
+    style.id = 'themePresetThumbnailStyles';
+    style.textContent = `
+      .theme-swatch.theme-card-thumb{
+        min-height: 98px;
+        padding: 9px;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .theme-swatch.theme-card-thumb .theme-mini-preview{
+        position: relative;
+        height: 56px;
+        overflow: hidden;
+        border-radius: 10px;
+        background:
+          radial-gradient(circle at 84% 12%, var(--thumb-accent-soft), transparent 24px),
+          linear-gradient(135deg, var(--thumb-bg0), var(--thumb-bg2));
+        border: 1px solid color-mix(in srgb, var(--thumb-text) 16%, transparent);
+        box-shadow: inset 0 1px 0 color-mix(in srgb, var(--thumb-text) 10%, transparent);
+      }
+      .theme-swatch.theme-card-thumb .theme-mini-bar{
+        position:absolute; left:8px; right:8px; top:7px; height:8px;
+        border-radius:999px; background:var(--thumb-bg3);
+      }
+      .theme-swatch.theme-card-thumb .theme-mini-pill{
+        position:absolute; left:8px; top:20px; width:42%; height:10px;
+        border-radius:999px; background:linear-gradient(90deg, var(--thumb-accent), var(--thumb-accentL));
+      }
+      .theme-swatch.theme-card-thumb .theme-mini-line{
+        position:absolute; left:56%; right:8px; top:21px; height:7px;
+        border-radius:999px; background:color-mix(in srgb, var(--thumb-text) 36%, transparent);
+        opacity:.85;
+      }
+      .theme-swatch.theme-card-thumb .theme-mini-posters{
+        position:absolute; left:8px; right:8px; bottom:7px;
+        display:grid; grid-template-columns:repeat(4,1fr); gap:5px;
+      }
+      .theme-swatch.theme-card-thumb .theme-mini-posters span{
+        height:15px; border-radius:4px;
+        background:linear-gradient(135deg, var(--thumb-bg3), var(--thumb-accent-soft));
+        border:1px solid color-mix(in srgb, var(--thumb-text) 10%, transparent);
+      }
+      .theme-swatch.theme-card-thumb .theme-label{
+        line-height: 1.1;
+        text-align: center;
+        color: inherit;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  document.querySelectorAll('.theme-swatch[data-theme]').forEach(btn => {
+    const key = btn.dataset.theme;
+    const t = presets[key];
+    if (!t || btn.dataset.thumbnailEnhanced === '1') return;
+    const label = (btn.textContent || key).trim();
+    btn.classList.add('theme-card-thumb');
+    btn.style.setProperty('--thumb-bg0', t.bg0);
+    btn.style.setProperty('--thumb-bg1', t.bg1);
+    btn.style.setProperty('--thumb-bg2', t.bg2);
+    btn.style.setProperty('--thumb-bg3', t.bg3);
+    btn.style.setProperty('--thumb-accent', t.accent);
+    btn.style.setProperty('--thumb-accentL', t.accentL);
+    btn.style.setProperty('--thumb-accent-soft', `${t.accent}55`);
+    btn.style.setProperty('--thumb-text', t.text);
+    btn.innerHTML = `
+      <span class="theme-mini-preview" aria-hidden="true">
+        <span class="theme-mini-bar"></span>
+        <span class="theme-mini-pill"></span>
+        <span class="theme-mini-line"></span>
+        <span class="theme-mini-posters"><span></span><span></span><span></span><span></span></span>
+      </span>
+      <span class="theme-label">${esc(label)}</span>
+    `;
+    btn.dataset.thumbnailEnhanced = '1';
+  });
+}
+
 function toast(msg) {
   const c = document.getElementById('toastContainer');
   const t = document.createElement('div');
@@ -1593,6 +1687,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindSettingsAccordion('themeToggle', 'themePanel', 'themeArrow');
 
   // ─── Theme Preset Swatches ───
+  enhanceThemePresetThumbnails();
   document.querySelectorAll('.theme-swatch').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.theme-swatch').forEach(b => b.classList.remove('active'));
