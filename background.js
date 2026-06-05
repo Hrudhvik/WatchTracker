@@ -1,6 +1,6 @@
 // Shared recommender for extension pages/content scripts. Best-effort: if a script fails
 // to load, the fetch proxy and widget fallback still work.
-try { importScripts('store.js', 'tmdb.js', 'recommendations.js'); } catch (e) { console.warn('Recommendation bridge unavailable', e); }
+try { importScripts('store.js', 'tmdb.js', 'sync.js', 'recommendations.js'); } catch (e) { console.warn('Background libraries unavailable', e); }
 
 /* ═══════════════════════════════════════════
    Background Service Worker — Fetch Proxy + Auto Sync
@@ -55,12 +55,109 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   }
+
+  if (msg.type === 'watchtracker:run-sync-now') {
+    (async () => {
+      const result = await runWatchTrackerBackgroundSync('manual', msg.source || 'all');
+      sendResponse({ ok: !result.errors?.length, body: result });
+    })();
+    return true;
+  }
+
+  if (msg.type === 'watchtracker:refresh-sync-alarm') {
+    (async () => {
+      await ensureWatchTrackerAlarm();
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
 });
 
-// ─── Alarm: periodic sync reminder ───
+async function ensureWatchTrackerAlarm() {
+  try {
+    const data = await chrome.storage.local.get(['syncConfig']);
+    const mins = Number(data.syncConfig?.syncInterval || 0);
+    await chrome.alarms.clear('watchtracker-sync');
+    if (mins > 0) {
+      // Chrome may clamp very small intervals; sync settings UI should still show the user value.
+      chrome.alarms.create('watchtracker-sync', { periodInMinutes: Math.max(1, mins) });
+    }
+  } catch (err) {
+    console.warn('[WatchTracker] Could not set auto-sync alarm', err);
+  }
+}
+
+async function runWatchTrackerBackgroundSync(reason = 'alarm', source = 'all') {
+  const startedAt = new Date().toISOString();
+  const summary = { reason, source, startedAt, finishedAt: '', added: 0, updated: 0, skipped: 0, diaryAdded: 0, sources: {}, errors: [] };
+  try {
+    if (typeof Store === 'undefined' || typeof SyncEngine === 'undefined') throw new Error('Sync engine is not loaded in background worker.');
+    await Store.load();
+    if (Store.dedupeDiary) Store.dedupeDiary();
+    await SyncEngine.loadConfig();
+    if (typeof MalOAuth !== 'undefined') await MalOAuth.load();
+
+    const cfg = SyncEngine.getConfig();
+    const entries = [];
+
+    if ((source === 'all' || source === 'letterboxd') && cfg.letterboxd) {
+      try {
+        const lb = await SyncEngine.syncLetterboxd(cfg.letterboxd);
+        summary.sources.letterboxd = lb.length;
+        entries.push(...lb);
+      } catch (err) {
+        summary.errors.push(`Letterboxd: ${err.message || String(err)}`);
+      }
+    }
+
+    const canUseOfficialMal = typeof MalOAuth !== 'undefined' && MalOAuth.isLoggedIn && MalOAuth.isLoggedIn();
+    if ((source === 'all' || source === 'mal') && canUseOfficialMal) {
+      try {
+        const mal = await MalOAuth.fetchAnimeList();
+        summary.sources.mal = mal.length;
+        entries.push(...mal);
+      } catch (err) {
+        summary.errors.push(`MAL OAuth: ${err.message || String(err)}`);
+      }
+    } else if ((source === 'all' || source === 'mal') && cfg.mal) {
+      try {
+        const mal = await SyncEngine.syncMal(cfg.mal);
+        summary.sources.mal = mal.length;
+        entries.push(...mal);
+      } catch (err) {
+        summary.errors.push(`MAL: ${err.message || String(err)}`);
+      }
+    }
+
+    if (entries.length) {
+      const matched = await SyncEngine.matchToTmdb(entries);
+      const results = Array.isArray(matched) ? matched : (matched.results || []);
+      const stats = await SyncEngine.applySyncResults(results, 'merge');
+      Object.assign(summary, {
+        added: stats.added || 0,
+        updated: stats.updated || 0,
+        skipped: stats.skipped || 0,
+        diaryAdded: stats.diaryAdded || 0,
+      });
+      if (Store.dedupeDiary) summary.dedupe = Store.dedupeDiary();
+    }
+
+    summary.finishedAt = new Date().toISOString();
+    await chrome.storage.local.set({ lastBackgroundSync: summary, lastBackgroundSyncError: null });
+    return summary;
+  } catch (err) {
+    summary.finishedAt = new Date().toISOString();
+    summary.errors.push(err.message || String(err));
+    await chrome.storage.local.set({ lastBackgroundSync: summary, lastBackgroundSyncError: summary });
+    return summary;
+  }
+}
+
+// ─── Alarm: real periodic sync while the popup/full app tab is closed ───
 chrome.alarms?.onAlarm?.addListener(async (alarm) => {
   if (alarm.name !== 'watchtracker-sync') return;
-  // Alarm fires but no badge — sync happens when user opens the app
+  await runWatchTrackerBackgroundSync('alarm');
 });
 
 chrome.runtime.onInstalled?.addListener(async () => {
@@ -71,11 +168,7 @@ chrome.runtime.onInstalled?.addListener(async () => {
   chrome.tabs?.query?.({ url: ['https://letterboxd.com/'] }, tabs => {
     for (const tab of tabs || []) injectLetterboxdWidget(tab.id, tab.url);
   });
-  const data = await chrome.storage.local.get(['syncConfig']);
-  const config = data.syncConfig;
-  if (config?.syncInterval > 0) {
-    chrome.alarms.create('watchtracker-sync', { periodInMinutes: config.syncInterval });
-  }
+  await ensureWatchTrackerAlarm();
 });
 
 
@@ -104,13 +197,16 @@ chrome.tabs?.onActivated?.addListener(async ({ tabId }) => {
 });
 
 chrome.runtime?.onStartup?.addListener(() => {
+  ensureWatchTrackerAlarm();
   chrome.tabs?.query?.({ url: ['https://letterboxd.com/'] }, tabs => {
     for (const tab of tabs || []) injectLetterboxdWidget(tab.id, tab.url);
   });
 });
 
 chrome.storage?.onChanged?.addListener((changes, area) => {
-  if (area !== 'local' || !changes.letterboxdWidgetEnabled) return;
+  if (area !== 'local') return;
+  if (changes.syncConfig) ensureWatchTrackerAlarm();
+  if (!changes.letterboxdWidgetEnabled) return;
   chrome.tabs?.query?.({ url: ['https://letterboxd.com/'] }, tabs => {
     for (const tab of tabs || []) injectLetterboxdWidget(tab.id, tab.url);
   });

@@ -29,6 +29,54 @@ const DetailUI = {
     return `<div class="detail-section quicklinks-detail-section"><h3>Quick Links</h3><div class="quicklinks-detail-list"><div class="quicklink-chip-row">${row}</div></div></div>`;
   },
 
+
+
+  _isLikelyLandscapeUrl(url) {
+    return new Promise(resolve => {
+      if (!url) { resolve(false); return; }
+      const img = new Image();
+      const done = ok => { img.onload = img.onerror = null; resolve(ok); };
+      const timer = setTimeout(() => done(false), 2500);
+      img.onload = () => {
+        clearTimeout(timer);
+        const w = img.naturalWidth || 0;
+        const h = img.naturalHeight || 0;
+        done(w >= h * 1.15);
+      };
+      img.onerror = () => { clearTimeout(timer); done(false); };
+      img.src = url;
+    });
+  },
+
+  async _findAniListBannerByMalId(malId) {
+    if (!malId) return '';
+    try {
+      const query = `query ($idMal: Int) { Media(idMal: $idMal, type: ANIME) { bannerImage } }`;
+      const res = await bgFetch('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ query, variables: { idMal: Number(malId) } })
+      });
+      return res.ok ? (res.body?.data?.Media?.bannerImage || '') : '';
+    } catch (_) {
+      return '';
+    }
+  },
+
+  async _findMalLandscapeBackdrop(anime, malId) {
+    // MAL/Jikan does not provide true landscape backdrops. AniList often has a
+    // native bannerImage for the same MAL id, which is the best non-TMDB
+    // replacement and avoids slow Jikan /pictures probing.
+    const anilistBanner = await this._findAniListBannerByMalId(malId || anime?.mal_id);
+    if (anilistBanner) return anilistBanner;
+
+    return anime?.trailer?.images?.maximum_image_url
+      || anime?.trailer?.images?.large_image_url
+      || anime?.trailer?.images?.medium_image_url
+      || anime?.trailer?.images?.image_url
+      || '';
+  },
+
   async open(tmdbId, mediaType, pushHistory = true) {
     const page = document.getElementById('page-detail');
     page.innerHTML = '<div style="padding:40px;color:var(--text-3)">Loading...</div>';
@@ -236,8 +284,8 @@ const DetailUI = {
         <div class="custom-dd-menu hidden" id="detailStatusMenu">
           ${statusEntries.map(e => `<div class="dd-item ${e.val===ws?'active':''}" data-val="${e.val}"><span class="dd-dot" style="background:${e.color}"></span>${e.label}</div>`).join('')}
         </div>
-      </div><button class="btn-accent" id="detailEditBtn">Edit</button><button class="btn-accent btn-diary-log" id="detailDiaryBtn">Log Diary</button>`;
-    } else { actions = `<button class="btn-accent" id="detailAddBtn">+ Add to List</button>`; }
+      </div><button class="btn-accent detail-icon-btn" id="detailLineupBtn" title="Add to Lineup" aria-label="Add to Lineup"><img src="icons/lineup.svg" alt=""></button><button class="btn-accent detail-icon-btn" id="detailEditBtn" title="Edit" aria-label="Edit"><img src="icons/edit.svg" alt=""></button><button class="btn-accent btn-diary-log detail-icon-btn" id="detailDiaryBtn" title="Log Diary" aria-label="Log Diary"><img src="icons/diary.svg" alt=""></button>`;
+    } else { actions = `<button class="btn-accent detail-icon-btn" id="detailAddBtn" title="Add to Watchlist" aria-label="Add to Watchlist"><img src="icons/watchlist.svg" alt=""></button>`; }
 
     const dates = inList && (sd||ed) ? `<div class="detail-dates-row">${sd?`<span class="detail-date-chip">Started: ${sd}</span>`:''}${ed?`<span class="detail-date-chip">Finished: ${ed}</span>`:''}</div>` : '';
 
@@ -287,7 +335,7 @@ const DetailUI = {
             <input class="ep-counter-input" data-snum="${s.season_number}" type="number" value="${w}" min="0" ${tot > 0 ? `max="${tot}"` : ''}>
             <span class="ep-counter-total">/ ${unknownTotal ? '?' : tot}</span>
             <button class="ep-inc" data-snum="${s.season_number}">+</button>
-          </div><div class="season-btn-col"><button class="season-done-btn ${done?'undone':'mark-done'}" data-snum="${s.season_number}">${done?'Undo':'Done'}</button><button class="season-diary-btn" data-snum="${s.season_number}" title="Log to diary">Log</button><button class="season-rw-btn" data-snum="${s.season_number}" title="Rewatch this season">↻ Rw${sRw > 0 ? ' '+sRw : ''}</button></div></div>
+          </div><div class="season-btn-col"><button class="season-done-btn ${done?'undone':'mark-done'}" data-snum="${s.season_number}" title="${done?'Mark unwatched':'Mark watched'}" aria-label="${done?'Mark unwatched':'Mark watched'}">${done?'↺':'✓'}</button><button class="season-lineup-btn" data-snum="${s.season_number}" title="Add season to Lineup" aria-label="Add season to Lineup"><img src="icons/lineup.svg" alt=""></button><button class="season-diary-btn" data-snum="${s.season_number}" title="Log to diary" aria-label="Log to diary"><img src="icons/diary.svg" alt=""></button><button class="season-rw-btn" data-snum="${s.season_number}" title="Rewatch this season" aria-label="Rewatch this season"><img src="icons/rewatch.svg" alt=""><span>${sRw > 0 ? sRw : ''}</span></button></div></div>
         </div>`;
       }).join('')}</div></div>`;
     }
@@ -471,6 +519,12 @@ const DetailUI = {
       });
     }
 
+    const lBtn = page.querySelector('#detailLineupBtn');
+    if (lBtn && stored) lBtn.addEventListener('click', () => {
+      const added = Store.addToLineup({ ...stored, mediaType }, { targetType: mediaType === 'movie' ? 'movie' : 'show' });
+      toast(added ? 'Added to Lineup' : 'Already in Lineup');
+      App.refreshCounts();
+    });
     const eBtn = page.querySelector('#detailEditBtn');
     if (eBtn) eBtn.addEventListener('click', () => this._editModal(tmdbId, mediaType, title, d));
     const dBtn = page.querySelector('#detailDiaryBtn');
@@ -500,6 +554,16 @@ const DetailUI = {
       this._bindSeason(page, tmdbId, tmdbS);
       page.querySelectorAll('.season-diary-btn').forEach(btn => {
         btn.addEventListener('click', e => { e.stopPropagation(); this._diaryLogModal(tmdbId,'tv',title,stored?.posterPath,parseInt(btn.dataset.snum)); });
+      });
+      page.querySelectorAll('.season-lineup-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          const sn = parseInt(btn.dataset.snum);
+          if (!stored) return;
+          const added = Store.addToLineup({ ...stored, mediaType }, { targetType: 'season', seasonNumber: sn });
+          toast(added ? `Added Season ${sn} to Lineup` : `Season ${sn} is already in Lineup`);
+          App.refreshCounts();
+        });
       });
       // Season info modal — click on season-info area (not buttons)
       page.querySelectorAll('.season-info[data-snum]').forEach(info => {
@@ -958,10 +1022,10 @@ const DetailUI = {
     const sOpts=!isM&&st?(st.seasons||[]).map(s=>`<option value="${s.seasonNumber}" ${season===s.seasonNumber?'selected':''}>Season ${s.seasonNumber}</option>`).join(''):'';
     const entries=Store.getDiary().filter(d=>d.tmdbId===tmdbId&&d.type===mediaType);
     const aL={completed:'Completed',rewatch:'Rewatched',watched:'Watched',watched_episodes:'Watched eps',started:'Started',session:'Session'};
-    const histHtml=entries.length?`<div class="dl-hist-section"><div class="dl-hist-header">Diary History (${entries.length})</div><div class="dl-hist-list">${entries.map(de=>{const a=aL[de.action]||de.action;const r=de.rating?` · ★ ${de.rating}`:'';const s=de.season?` · S${de.season}`:'';return`<div class="dl-hist-row"><div class="dl-hist-info"><span class="dl-hist-date">${de.date||'—'}</span><span class="dl-hist-act">${a}${s}${r}</span></div><button class="dl-hist-edit" data-ts="${de.timestamp}">Edit</button><button class="dl-hist-del" data-ts="${de.timestamp}">Remove</button></div>`;}).join('')}</div></div>`:'';
+    const histHtml=entries.length?`<div class="dl-hist-section"><div class="dl-hist-header">Diary History (${entries.length})</div><div class="dl-hist-list">${entries.map(de=>{const a=aL[de.action]||de.action;const r=de.rating?` · ★ ${de.rating}`:'';const s=de.season?` · S${de.season}`:'';return`<div class="dl-hist-row"><div class="dl-hist-info"><span class="dl-hist-date">${de.date||'—'}</span><span class="dl-hist-act">${a}${s}${r}</span></div><button class="dl-hist-edit icon-only-sm" data-ts="${de.timestamp}" title="Edit" aria-label="Edit"><img src="icons/edit.svg" alt=""></button><button class="dl-hist-del icon-only-sm trash" data-ts="${de.timestamp}" title="Remove" aria-label="Remove"><img src="icons/trash.svg" alt=""></button></div>`;}).join('')}</div></div>`:'';
     const html=`<div class="modal-backdrop edit-modal-backdrop" id="diaryLogModal"><div class="modal-box edit-modal-box" style="max-width:460px;"><div class="modal-header"><h2>Log Diary</h2><button class="modal-close-btn" id="dlClose">&#10005;</button></div><div class="modal-body">
       <div class="dp-hero"><div class="dp-poster">${poster?`<img src="${poster}">`:`<div class="no-poster-ph" style="width:72px;height:108px;border-radius:6px;">${isM?'MOV':'TV'}</div>`}</div><div class="dp-info"><div class="dp-title">${esc(title)}</div>${season?`<div class="dp-season-tag">Season ${season}</div>`:''}</div></div>
-      <div class="edit-field"><div class="edit-field-label">Date</div><div class="edit-date-input-row"><input type="date" id="dlDate" value="${today}" class="edit-date-input" style="flex:1;"><button class="btn-today" id="dlToday">Today</button></div></div>
+      <div class="edit-field"><div class="edit-field-label">Date</div><div class="edit-date-input-row date-with-today"><input type="date" id="dlDate" value="${today}" class="edit-date-input" style="flex:1;"><button class="btn-today inline" id="dlToday">Today</button></div></div>
       <div class="edit-dates-row"><div class="edit-field edit-field-half"><div class="edit-field-label">Action</div><select id="dlAction" class="edit-select" style="width:100%;"><option value="watched">Watched</option><option value="rewatch">Rewatched</option></select></div><div class="edit-field edit-field-half"><div class="edit-field-label">Rating</div><select id="dlRating" class="edit-select" style="width:100%;"><option value="0">— None —</option>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}">★ ${n}/10</option>`).join('')}</select></div></div>
       ${!isM&&!season?`<div class="edit-field"><div class="edit-field-label">Season</div><select id="dlSeason" class="edit-select" style="width:100%;"><option value="">General / All</option>${sOpts}</select></div>`:''}
       <div class="edit-field"><div class="edit-field-label">Notes</div><textarea class="diary-notes-input" id="dlNotes" rows="2" placeholder="Thoughts..."></textarea></div>
@@ -1113,8 +1177,9 @@ const DetailUI = {
             if (anime.images?.jpg?.large_image_url) {
               d.poster_path = anime.images.jpg.large_image_url;
             }
-            if (anime.trailer?.images?.maximum_image_url) {
-              d.backdrop_path = anime.trailer.images.maximum_image_url;
+            const malBackdrop = await this._findMalLandscapeBackdrop(anime, stored.malId);
+            if (malBackdrop) {
+              d.backdrop_path = malBackdrop;
             }
             // YouTube trailer from Jikan
             if (anime.trailer?.youtube_id) {
@@ -1155,6 +1220,7 @@ const DetailUI = {
             // Update stored data with Jikan info
             const storeUpdates = { genres: d.genres.map(g => g.name), voteAverage: d.vote_average };
             if (d.poster_path && d.poster_path.startsWith('http')) storeUpdates.posterPath = d.poster_path;
+            if (d.backdrop_path && d.backdrop_path.startsWith('http')) storeUpdates.backdropPath = d.backdrop_path;
             if (anime.episodes && stored.seasons && stored.seasons.length > 0) {
               const ss = [...stored.seasons];
               ss[0].episodeCount = anime.episodes;

@@ -1,286 +1,59 @@
-# WatchTracker — Browser Extension
-
-Track movies and TV shows, manage your watchlist, log diary entries, open custom quick links from detail pages, and get recommendations based on your own library.
-
-WatchTracker is a local-first Chrome extension powered by TMDB.
-
-## Features
-
-- **Search movies and TV shows** using TMDB.
-- **Track status**: Watching, Plan to Watch, Completed, On Hold, Dropped.
-- **Episode progress** for TV shows.
-- **Rate titles** on a 1–10 scale.
-- **Diary logging** for watched movies, episodes, rewatches, ratings, and notes.
-- **Filter and browse** your saved movies and shows.
-- **Profile and activity views** for your watching history.
-- **Export/Import** your data as a JSON backup.
-- **MyAnimeList sync** for anime tracking.
-- **Recommendations** from the full app and popup.
-- **External links** to TMDB, IMDb, and Letterboxd for movies.
-- **Custom Quick Links** for opening a movie or TV show search on streaming/search sites.
-- **Default Quick Links** for Netflix, Prime Video, Hulu, and YouTube.
-- **Quick Link management** with show/hide selection, custom links, and reorder/arrange mode.
-- **Letterboxd Surprise Widget** on the Letterboxd home page for random movie suggestions by genre, language, decade, rating, and watched-status preference.
-
-## Quick Links
-
-WatchTracker includes Quick Links that appear on movie and TV detail pages in both the full app and the extension popup.
-
-Quick Links let you open the current title on external search pages such as Netflix, Prime Video, Hulu, YouTube, or any custom site you add.
-
-### Default Quick Links
-
-The built-in default Quick Links are:
-
-- Netflix
-- Prime Video
-- Hulu
-- YouTube
-
-Other default streaming links are intentionally disabled/commented out in code so only these defaults appear by default.
-
-### Show or Hide Quick Links
-
-Open **Settings → Quick Links**.
-
-Click a Quick Link card/title to select or unselect it:
-
-- Selected links are highlighted and appear on detail pages.
-- Unselected links are hidden from detail pages and from arrange mode.
-
-This applies to both default links and custom links.
-
-### Add a Custom Quick Link
-
-Custom Quick Links use two fields:
-
-- **Name** — the display name shown in WatchTracker.
-- **Search link** — the URL pattern used when opening the current movie or TV show.
-
-Example:
-
-```txt
-https://xyz.com/search?q={searchtermPlus}/?adult
-```
-
-If the current title is `Good Day`, WatchTracker replaces `{searchtermPlus}` with:
-
-```txt
-good+day
-```
-
-So the opened URL becomes:
-
-```txt
-https://xyz.com/search?q=good+day/?adult
-```
-
-### Search Term Placeholders
-
-Use these placeholders in custom Quick Link URLs:
-
-```txt
-{searchterm}           → no%20game%20no%20life
-{searchtermPlus}       → no+game+no+life
-{searchtermMinus}      → no-game-no-life
-{searchtermUnderscore} → no_game_no_life
-{searchtermRaw}        → no game no life
-```
-
-Recommended placeholder for most search URLs:
-
-```txt
-{searchtermPlus}
-```
-
-### Edit or Remove Custom Quick Links
-
-Default Quick Links cannot be edited or removed.
-
-Custom Quick Links can be:
-
-- Edited with the edit button.
-- Removed with the remove button.
-- Selected/unselected by clicking the card/title.
-
-### Arrange Quick Links
-
-Click **Arrange** in **Settings → Quick Links** to reorder selected Quick Links.
-
-Arrange mode shows only selected/enabled links. You can reorder links using:
-
-- Drag-and-drop.
-- Up/down buttons.
-
-The order you choose controls the order shown on detail pages and in the popup.
-
-## Recommendations
-
-WatchTracker includes a recommendations page in the main app and a compact recommendation view in the popup.
-
-Recommendation sources:
-
-- **Something new** — suggests titles not already saved in your library.
-- **Plan to Watch** — picks from your saved Plan to Watch list.
-- **Completed** — recommends from titles you already completed.
-- **My Library** — picks from your full saved library.
-
-Recommendation styles:
-
-- **Closest match** — uses your library and ratings to find similar titles.
-- **Similar to favorites** — uses your highly rated titles as anchors.
-- **Hidden gems** — favors less obvious titles while still requiring enough vote confidence.
-- **Popular** — favors well-known titles.
-- **Surprise me** — adds more variety.
-- **Random by filters** — ignores taste and uses only selected filters like language, genre, decade, and rating.
-
-Available filters:
-
-- Pick count: **1, 3, 5, 10, 15, 20** in the full app; compact counts in the popup.
-- Type: **Movies**, **TV Shows**, **Movies + TV**.
-- Library handling: **New only**, **Not completed**, **Allow saved**.
-- Genre.
-- Decade.
-- Language with searchable language input.
-- Minimum TMDB rating: **Any, 6+, 7+, 8+, 9+**.
-- Minimum personal rating: **Any, 6+, 7+, 8+, 9+**.
-
-### Regional-language recommendations
-
-The recommendation engine is tuned for regional and international films. It supports languages such as Telugu, Tamil, Malayalam, Kannada, Hindi, Bengali, Marathi, Japanese, Korean, Mandarin/Chinese, Cantonese, Thai, French, Spanish, Italian, German, Turkish, Arabic, Persian, and many others.
-
-For regional-language recommendations, WatchTracker avoids strict global vote-count cutoffs. Instead, it fetches a broader language-specific pool and ranks results locally. Vote counts are weighted heavily enough to avoid single-digit-vote titles, but not so aggressively that regional films are unfairly hidden.
-
-### Vote-aware ranking
-
-Recommendations use vote confidence to avoid unreliable picks. The engine considers:
-
-- TMDB rating.
-- TMDB vote count.
-- Your personal ratings and saved library.
-- Genre, language, type, and decade filters.
-- Recently shown recommendations, so repeated clicks do not simply reshuffle the same titles.
-
-## Letterboxd Surprise Widget
-
-WatchTracker can show a small Letterboxd-styled dice button on the Letterboxd home page:
-
-```txt
-https://letterboxd.com/
-```
-
-The widget is intentionally restricted to the Letterboxd home page only. It does not appear on `/films/`, `/lists/`, profile pages, film pages, or other Letterboxd subpages.
-
-Enable or disable it from **WatchTracker Settings → Letterboxd Surprise Widget**.
-
-When enabled, the dice button opens a compact randomizer panel with filters for:
-
-- Genre.
-- Language.
-- Minimum TMDB rating.
-- Year/decade, such as Any, 2020s, 2010s, 2000s, 1990s, and older decades.
-- Include already watched.
-
-Click **Surprise** to get a random movie suggestion with poster, year, language, TMDB rating, genres, and overview. Click **Go** to open that movie on Letterboxd.
-
-The widget uses temporary tab/session memory to reduce repeated suggestions while browsing. **Reset memory** clears the current filters, current result, watched toggle state, saved widget preferences for the session, and temporary suggestion memory.
-
-The randomizer uses TMDB discovery data and your saved WatchTracker library. By default, it avoids titles already in your WatchTracker movie list unless **Include already watched** is enabled.
-
-## External Links
-
-Detail pages can include:
-
-- TMDB link.
-- IMDb link when an IMDb ID is available.
-- Letterboxd link for movies using the TMDB redirect format.
-- Quick Links for enabled default and custom search links.
-
-Letterboxd movie links use:
-
-```txt
-https://letterboxd.com/tmdb/{tmdbId}/
-```
-
-## Settings
-
-Settings are grouped into collapsible sections, including:
-
-- **Quick Links** — default links, custom links, selection, editing, and arrange mode.
-- **Letterboxd Surprise Widget** — enable or disable the Letterboxd home-page dice widget.
-- **Export/Import** — backup and restore data.
+# WatchTracker
+
+WatchTracker is a Chrome extension for tracking movies, TV shows, anime, diary entries, rewatch progress, recommendations, and a watch-next Lineup.
+
+## Highlights
+
+- **Watchlist** for TMDB movies/TV and MAL anime.
+- **Lineup** queue for what to watch next, with drag-and-drop reordering.
+- **Diary** with cross-source duplicate prevention for manual entries, Letterboxd, imports, and MAL sync.
+- **Background auto-sync** for Letterboxd and MAL using Chrome alarms.
+- **Popup dashboard** with Watchlist, Lineup, Diary, Search, and Settings quick access.
+- **New-tab dashboard** with Watchlist, Lineup, Diary, Recommendations, and Profile.
+- **Separated TMDB and Anime/MAL search** in both popup and new-tab search.
+- **Theme system** with the current presets:
+  - Midnight (default)
+  - OLED Black
+  - Deep Ocean
+  - Nord
+  - Sakura Night
+  - Matcha
+  - Cloud
+  - Latte
+  - Custom
+- **Unified icon and branding system** using a squircle WatchTracker logo with a play button and progress ring.
+
+## Current branding
+
+The app icon uses:
+
+- Indigo squircle background
+- White play triangle
+- Circular progress ring
+- Clean `WatchTracker` typography, with `Watch` using the active theme text color and `Tracker` using the active theme accent
 
 ## Setup
 
-### 1. Get a TMDB API Key
+1. Download or clone this project.
+2. Open Chrome and go to `chrome://extensions`.
+3. Enable **Developer mode**.
+4. Click **Load unpacked**.
+5. Select the WatchTracker folder.
+6. Open the extension settings and configure TMDB, Letterboxd, and MAL as needed.
 
-1. Go to [themoviedb.org](https://www.themoviedb.org/) and create a free account.
-2. Open **Settings → API**.
-3. Request an API key.
-4. Copy your **API Key (v3 auth)**.
-5. Paste it into WatchTracker settings.
-6. Use the clear button in settings if you ever want to remove the saved TMDB key.
+## Sync behavior
 
-TMDB is required for search, posters, metadata, and recommendations.
+Auto-sync runs from the extension background service worker using Chrome alarms. It can run even when the popup or dashboard tab is closed, subject to Chrome extension service-worker scheduling.
 
+The popup settings only contain quick controls. Full account/API setup remains in the full settings page.
 
-2. Get an API key.
-3. Paste it into WatchTracker settings.
+## Development notes
 
-
-### 3. Optional: MyAnimeList Sync
-
-If you track anime on MyAnimeList, you can sync your library directly:
-
-1. Go to [myanimelist.net/apiconfig](https://myanimelist.net/apiconfig).
-2. Create a new client.
-3. Set **App Type** to `other`.
-4. Set **App Redirect URI** to the exact URL displayed in WatchTracker settings.
-5. Copy your **Client ID** into WatchTracker.
-6. Log in from WatchTracker.
-
-### 4. Install the Extension
-
-1. Open Chrome and go to `chrome://extensions/`.
-2. Enable **Developer mode**.
-3. Click **Load unpacked**.
-4. Select the WatchTracker folder.
-5. Click the extension icon in your toolbar.
-
-## Data Storage & Privacy
-
-WatchTracker stores your data locally using `chrome.storage.local`.
-
-Your library, diary, settings, API keys, Quick Links, Letterboxd widget preference, and cached recommendation data stay in your browser. The extension only contacts external services when needed for features such as search, metadata, ratings, sync, recommendations, or opening external Quick Links.
-
-External services used:
-
-- **TMDB** for search, posters, metadata, genres, languages, and discovery.
-- **MyAnimeList** only if MAL sync is configured.
-- **Enabled Quick Link sites** only when you click those links.
+- Do not commit local API keys, exported watchlists, or generated ZIP packages.
+- Keep UI icons in `icons/` so popup and dashboard use the same visual language.
+- If a new theme is added, update the theme preset list in both `app.js`, `popup.js`, and `early-theme.js`.
 
 
-## Development Notes
+## Theme palettes
 
-Main files:
-
-- `app.html` — main app shell and settings UI.
-- `app.js` — app navigation, settings handlers, and Quick Link management UI.
-- `popup.html`, `popup.js`, `popup.css` — popup UI and popup detail Quick Links.
-- `store.js` — local storage/data helpers, including Quick Link defaults and persistence.
-- `tmdb.js` — TMDB API helpers.
-- `recommendations.js` — recommendation engine.
-- `ui-recommendations.js` — recommendations page UI.
-- `ui-detail.js` — movie/show detail UI and detail-page Quick Links.
-- `styles.css` — main app styles, including Quick Link settings and arrange mode.
-- `letterboxd-widget.js` — Letterboxd home-page dice widget.
-- `letterboxd-widget.css` — Letterboxd widget styling.
-
-## Notes
-
-- TMDB and IMDb ratings are public ratings, not your personal ratings.
-- Your personal rating is used separately when building taste-based recommendations.
-- Very narrow filters may produce fewer results, especially for TV shows or less common language/genre combinations.
-- Regional-language recommendations intentionally use more flexible vote logic than global recommendations.
-- The Letterboxd dice widget only appears on `https://letterboxd.com/` when enabled in settings.
-- Quick Link search behavior depends on each external site's current search URL format and login/session requirements.
+The theme engine uses layered tokens (`bg0`, `bg1`, `bg2`, `bg3`, `bg4`, `accent`, `accentL`, `text0`, `text1`, `text2`, `text3`, `border`). Midnight is the default rich dark slate preset with purple accents.

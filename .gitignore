@@ -1,4 +1,48 @@
+# Dependencies / tooling
 node_modules/
+.npm/
+.yarn/
+.pnpm-store/
+
+# Build outputs
+build/
+dist/
+out/
+coverage/
+*.zip
+*.crx
+*.pem
+
+# Local secrets and extension config
+.env
+.env.*
+*.local
+secrets.*
+api-keys.*
+config.local.*
+
+# User exports / imports / backups
+exports/
+imports/
+backups/
+*.backup
+*.bak
+*.csv
+*.jsonl
+
+# Logs and caches
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 .DS_Store
-/backups
-RECOMMENDATION_UPGRADE.md
+Thumbs.db
+.cache/
+.tmp/
+tmp/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo

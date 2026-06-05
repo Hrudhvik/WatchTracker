@@ -1,5 +1,58 @@
 /* Popup — list + detail + TMDB + MAL search, persistent prefs */
 
+
+/* Theme-aware SVG icon inliner: external SVG <img> files cannot inherit the
+   surrounding button text color, so local icon SVGs are inlined and colored
+   with currentColor. */
+function initThemeAwareSvgIcons(root = document) {
+  const selector = 'img[src^="icons/"][src$=".svg"]:not([src$="logo.svg"]):not([data-svg-inlined])';
+  const imgs = Array.from(root.querySelectorAll(selector));
+  imgs.forEach(async img => {
+    if (img.dataset.svgInlined) return;
+    img.dataset.svgInlined = 'pending';
+    try {
+      const src = img.getAttribute('src');
+      const res = await fetch(src);
+      if (!res.ok) throw new Error(`Unable to load ${src}`);
+      const text = await res.text();
+      const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+      const svg = doc.querySelector('svg');
+      if (!svg) throw new Error(`Invalid SVG ${src}`);
+      svg.removeAttribute('width');
+      svg.removeAttribute('height');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.setAttribute('focusable', 'false');
+      svg.querySelectorAll('[stroke]').forEach(el => {
+        if ((el.getAttribute('stroke') || '').toLowerCase() !== 'none') el.setAttribute('stroke', 'currentColor');
+      });
+      svg.querySelectorAll('[fill]').forEach(el => {
+        if ((el.getAttribute('fill') || '').toLowerCase() !== 'none') el.setAttribute('fill', 'currentColor');
+      });
+      const icon = document.createElement('span');
+      icon.className = `${img.className || ''} themed-svg-icon`.trim();
+      icon.setAttribute('aria-hidden', 'true');
+      icon.innerHTML = new XMLSerializer().serializeToString(svg);
+      img.replaceWith(icon);
+    } catch (_) {
+      img.dataset.svgInlined = 'failed';
+    }
+  });
+}
+
+function watchThemeAwareSvgIcons() {
+  initThemeAwareSvgIcons();
+  const observer = new MutationObserver(mutations => {
+    for (const mutation of mutations) {
+      mutation.addedNodes.forEach(node => {
+        if (node.nodeType !== 1) return;
+        if (node.matches?.('img[src^="icons/"][src$=".svg"]:not([src$="logo.svg"])')) initThemeAwareSvgIcons(node.parentElement || document);
+        else if (node.querySelector?.('img[src^="icons/"][src$=".svg"]:not([src$="logo.svg"])')) initThemeAwareSvgIcons(node);
+      });
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
 // Route external API fetches through background.js when available (MV3/CORS-safe).
 async function popupBgFetch(url, options) {
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
@@ -35,16 +88,61 @@ function popupMalTitle(anime) {
   return anime?.title_english || anime?.title || anime?.title_japanese || 'Untitled';
 }
 
+
+function popupIsLandscapeImageUrl(url) {
+  return new Promise(resolve => {
+    if (!url) { resolve(false); return; }
+    const img = new Image();
+    const finish = ok => { img.onload = img.onerror = null; resolve(ok); };
+    const timer = setTimeout(() => finish(false), 2200);
+    img.onload = () => {
+      clearTimeout(timer);
+      const w = img.naturalWidth || 0;
+      const h = img.naturalHeight || 0;
+      finish(w >= h * 1.15);
+    };
+    img.onerror = () => { clearTimeout(timer); finish(false); };
+    img.src = url;
+  });
+}
+
+async function popupMALAnilistBanner(malId) {
+  if (!malId) return null;
+  try {
+    const query = `query ($idMal: Int) { Media(idMal: $idMal, type: ANIME) { bannerImage } }`;
+    const res = await popupBgFetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ query, variables: { idMal: Number(malId) } })
+    });
+    return res.ok ? (res.body?.data?.Media?.bannerImage || null) : null;
+  } catch (_) { return null; }
+}
+
+async function popupMALLandscapeBackdrop(anime, malId) {
+  // MAL/Jikan does not have TMDB-style backdrops. AniList commonly exposes a
+  // proper landscape banner for the same MAL id, so use it first.
+  const anilistBanner = await popupMALAnilistBanner(malId || anime?.mal_id);
+  if (anilistBanner) return anilistBanner;
+
+  return anime?.trailer?.images?.maximum_image_url
+    || anime?.trailer?.images?.large_image_url
+    || anime?.trailer?.images?.medium_image_url
+    || anime?.trailer?.images?.image_url
+    || null;
+}
+
 const STATUS_CFG = {
   watching: { label: 'Watching', color: '#00b894' },
-  completed: { label: 'Completed', color: '#6c5ce7' },
+  completed: { label: 'Completed', color: '#8B5CF6' },
   on_hold: { label: 'On-Hold', color: '#fdcb6e' },
   dropped: { label: 'Dropped', color: '#e17055' },
   plan_to_watch: { label: 'Plan to Watch', color: '#a29bfe' },
-  all: { label: 'All', color: 'linear-gradient(135deg,#00b894,#6c5ce7,#e17055)' },
+  all: { label: 'All', color: 'linear-gradient(135deg,#00b894,#8B5CF6,#e17055)' },
 };
 
-let pFilter = 'watching', pType = 'all', pSort = 'dateUpdated', pView = 'list', pQuery = '';
+let pFilter = 'watching', pSource = 'all', pType = 'all', pSort = 'dateUpdated', pView = 'list', pQuery = '';
+let pSearchSource = 'tmdb';
 let pMode = 'list';
 let pReturnMode = 'list';
 let pSearchTimeout = null;
@@ -55,11 +153,13 @@ function setPopupModeTabs(mode) {
   const switcher = document.getElementById('pModeSwitch');
   const lib = document.getElementById('pModeLibrary');
   const ext = document.getElementById('pModeExternal');
-  if (!switcher || !lib || !ext) return;
+  const anime = document.getElementById('pModeAnime');
+  if (!switcher || !lib || !ext || !anime) return;
   const visible = mode === 'list-search' || mode === 'search';
   switcher.classList.toggle('hidden', !visible);
   lib.classList.toggle('active', mode === 'list-search');
-  ext.classList.toggle('active', mode === 'search');
+  ext.classList.toggle('active', mode === 'search' && pSearchSource === 'tmdb');
+  anime.classList.toggle('active', mode === 'search' && pSearchSource === 'mal');
 }
 
 function showPopupSearchPage(activeMode) {
@@ -81,6 +181,7 @@ function hidePopupSearchPage() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  watchThemeAwareSvgIcons();
   await Store.load();
   const apiKey = Store.getApiKey();
   if (apiKey) TMDB.setKey(apiKey);
@@ -92,32 +193,42 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('pOpenTab').addEventListener('click', () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('app.html') }); window.close();
   });
-  document.getElementById('pSettings').addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('app.html') + '#settings' }); window.close();
-  });
+  document.getElementById('pSettings').addEventListener('click', () => enterPopupSettingsMode());
   document.getElementById('pClose').addEventListener('click', () => window.close());
-  document.getElementById('pSearchBtn').addEventListener('click', () => enterTMDBMode(true));
+  document.getElementById('pSearchBtn').addEventListener('click', () => enterTMDBMode(true, pSearchSource || 'tmdb'));
+  document.getElementById('pLineupBtn')?.addEventListener('click', () => enterLineupMode());
 
   const pModeLibrary = document.getElementById('pModeLibrary');
   const pModeExternal = document.getElementById('pModeExternal');
+  const pModeAnime = document.getElementById('pModeAnime');
   if (pModeLibrary) pModeLibrary.addEventListener('click', () => enterLibrarySearchMode(true));
-  if (pModeExternal) pModeExternal.addEventListener('click', () => enterTMDBMode(true));
+  if (pModeExternal) pModeExternal.addEventListener('click', () => enterTMDBMode(true, 'tmdb'));
+  if (pModeAnime) pModeAnime.addEventListener('click', () => enterTMDBMode(true, 'mal'));
 
   // Diary view
   document.getElementById('pDiaryBtn').addEventListener('click', () => enterDiaryMode());
-  document.getElementById('pRecBtn').addEventListener('click', () => enterRecommendationsMode());
+  document.getElementById('pRecBtn')?.addEventListener('click', () => enterRecommendationsMode());
 
   // Back — returns to the previous popup view when possible
   document.getElementById('pBack').addEventListener('click', () => {
-    if (pMode === 'detail' && pReturnMode === 'recommendations') enterRecommendationsMode(false);
+    if (pMode === 'detail' && pReturnMode === 'lineup') enterLineupMode();
+    else if (pMode === 'detail' && pReturnMode === 'recommendations') enterRecommendationsMode(false);
     else if (pMode === 'detail' && pReturnMode === 'search') returnToPopupSearch();
     else if (pMode === 'detail' && pReturnMode === 'list-search') enterLibrarySearchMode(true);
-    else if (pMode === 'search' || pMode === 'list-search') goBackToList();
+    else if (pMode === 'search' || pMode === 'list-search' || pMode === 'lineup') goBackToList();
     else goBackToList();
   });
 
 
-  // Type toggle
+  // Source + type toggles
+  document.querySelectorAll('.p-source').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.p-source').forEach(t => t.classList.remove('active'));
+    b.classList.add('active');
+    pSource = b.dataset.source || 'all';
+    savePrefs();
+    renderList();
+  }));
+
   document.querySelectorAll('.p-type').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('.p-type').forEach(t => t.classList.remove('active'));
     b.classList.add('active'); pType = b.dataset.type; savePrefs(); renderList();
@@ -148,11 +259,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     clearTimeout(pSearchTimeout);
     const q = e.target.value.trim();
     if (!q) {
-      document.getElementById('pList').innerHTML = '<div class="p-search-msg">Type to search TMDB and MAL for movies, TV shows, and anime</div>';
+      document.getElementById('pList').innerHTML = `<div class="p-search-msg">Type to search ${pSearchSource === 'mal' ? 'Anime / MAL' : 'TMDB movies & TV'}</div>`;
       return;
     }
     if (q.length >= 2) {
-      document.getElementById('pList').innerHTML = '<div class="p-search-msg">Searching TMDB + MAL...</div>';
+      document.getElementById('pList').innerHTML = `<div class="p-search-msg">Searching ${pSearchSource === 'mal' ? 'Anime / MAL' : 'TMDB'}...</div>`;
       pSearchTimeout = setTimeout(() => searchTMDB(q), 350);
     }
   });
@@ -179,15 +290,19 @@ document.addEventListener('DOMContentLoaded', async () => {
    ═══════════════════════════════════════════ */
 
 function savePrefs() {
-  Store.setPopupPrefs({ filter: pFilter, type: pType, sort: pSort, view: pView });
+  Store.setPopupPrefs({ filter: pFilter, source: pSource, type: pType, sort: pSort, view: pView });
 }
 
 function restorePrefs() {
   const p = Store.getPopupPrefs();
   if (!p) return;
   if (p.filter) { pFilter = p.filter; setStatusDD(pFilter); }
+  if (p.source) {
+    pSource = p.source;
+    document.querySelectorAll('.p-source').forEach(b => b.classList.toggle('active', b.dataset.source === pSource));
+  }
   if (p.type) {
-    pType = p.type;
+    pType = p.type === 'anime' ? 'all' : p.type;
     document.querySelectorAll('.p-type').forEach(b => b.classList.toggle('active', b.dataset.type === pType));
   }
   if (p.sort) {
@@ -294,6 +409,9 @@ function closeSortDD() {
    ═══════════════════════════════════════════ */
 
 function goBackToList() {
+  document.querySelector('.p-footer')?.classList.remove('hidden');
+  document.getElementById('pInlineSettings')?.classList.add('hidden');
+  document.getElementById('pList')?.classList.remove('hidden');
   pMode = 'list';
   hidePopupSearchPage();
   pReturnMode = 'list';
@@ -302,7 +420,8 @@ function goBackToList() {
   document.getElementById('pSearchBtn').classList.remove('hidden');
   document.getElementById('pAddNew')?.classList.remove('hidden');
   document.getElementById('pDiaryBtn').classList.remove('hidden');
-  document.getElementById('pRecBtn').classList.remove('hidden');
+  document.getElementById('pLineupBtn')?.classList.remove('hidden');
+  document.getElementById('pRecBtn')?.classList.remove('hidden');
   document.getElementById('pTmdbSearch').value = '';
   document.getElementById('pSearch').value = '';
   pQuery = '';
@@ -311,6 +430,8 @@ function goBackToList() {
 }
 
 function enterLibrarySearchMode(preserveQuery = true) {
+  document.getElementById('pInlineSettings')?.classList.add('hidden');
+  document.getElementById('pList')?.classList.remove('hidden');
   pMode = 'list-search';
   pReturnMode = 'list-search';
   document.getElementById('pBack').classList.remove('hidden');
@@ -319,7 +440,8 @@ function enterLibrarySearchMode(preserveQuery = true) {
   document.getElementById('pSearchBtn').classList.add('hidden');
   document.getElementById('pAddNew')?.classList.add('hidden');
   document.getElementById('pDiaryBtn').classList.add('hidden');
-  document.getElementById('pRecBtn').classList.add('hidden');
+  document.getElementById('pLineupBtn')?.classList.add('hidden');
+  document.getElementById('pRecBtn')?.classList.add('hidden');
   document.getElementById('pEmpty').classList.add('hidden');
   const input = document.getElementById('pSearch');
   if (!preserveQuery) { input.value = ''; pQuery = ''; }
@@ -338,7 +460,116 @@ function returnToPopupSearch() {
   }
 }
 
+
+function enterLineupMode() {
+  document.getElementById('pInlineSettings')?.classList.add('hidden');
+  document.getElementById('pList')?.classList.remove('hidden');
+  pMode = 'lineup';
+  setPopupModeTabs('hidden');
+  pReturnMode = 'list';
+  document.getElementById('pBack').classList.remove('hidden');
+  document.getElementById('pControls').classList.add('hidden');
+  hidePopupSearchPage();
+  document.getElementById('pSearchBtn').classList.add('hidden');
+  document.getElementById('pLineupBtn')?.classList.add('hidden');
+  document.getElementById('pDiaryBtn').classList.add('hidden');
+  document.getElementById('pRecBtn')?.classList.add('hidden');
+  document.getElementById('pEmpty').classList.add('hidden');
+  renderPopupLineup();
+}
+
+function renderPopupLineup() {
+  if (Store.cleanupLineup) Store.cleanupLineup();
+  const el = document.getElementById('pList');
+  const lineup = (Store.getLineup ? Store.getLineup() : []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  if (!lineup.length) {
+    el.innerHTML = '<div class="p-search-msg">Your Lineup is empty. Open a title and tap Add to Lineup.</div>';
+    return;
+  }
+  el.innerHTML = `<div class="p-lineup-wrap"><div class="p-lineup-head"><div class="pd-title">Lineup</div><div class="pd-sub">What you are watching next · drag to reorder</div></div><div class="p-lineup-list">${lineup.map((entry, idx) => {
+    const item = Store._lineupMediaFor ? Store._lineupMediaFor(entry) : null;
+    const poster = TMDB.poster((item && item.posterPath) || entry.posterPath, 'w92');
+    const title = esc((item && item.title) || entry.title || 'Untitled');
+    const source = entry.source === 'mal' || entry.type === 'anime' ? 'MAL' : 'TMDB';
+    const label = entry.targetType === 'season' ? `S${entry.seasonNumber}` : entry.type === 'movie' ? 'Movie' : entry.type === 'anime' ? 'Anime' : 'TV';
+    const year = ((item && (item.year || item.releaseDate || item.firstAirDate || item.release_date || item.first_air_date)) || '').toString().slice(0,4);
+    let progress = '';
+    if (item && entry.mediaType !== 'movie') {
+      const seasons = item.seasons || [];
+      if (entry.targetType === 'season') {
+        const season = seasons.find(x => Number(x.seasonNumber) === Number(entry.seasonNumber));
+        if (season) progress = `${season.episodesWatched || 0}/${season.episodeCount || '?'} eps`;
+      } else {
+        const watched = seasons.reduce((sum, season) => sum + (season.episodesWatched || 0), 0);
+        const total = seasons.reduce((sum, season) => sum + (season.episodeCount || 0), 0);
+        progress = `${watched}/${total || '?'} eps`;
+      }
+    }
+    const status = item ? (item.watchStatus || 'plan_to_watch').replaceAll('_',' ') : 'missing';
+    const meta = [label, year, progress].filter(Boolean).map(x => esc(x)).join(' <span class="p-lineup-dot">•</span> ');
+    return `<div class="p-lineup-card" data-id="${entry.id}">
+      <button class="p-lineup-drag" type="button" title="Drag to reorder" aria-label="Drag to reorder"><span></span><span></span><span></span><span></span><span></span><span></span></button>
+      <div class="p-lineup-rank">${idx + 1}</div>
+      <div class="p-lineup-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">${entry.mediaType === 'movie' ? 'MOV' : 'TV'}</div>`}</div>
+      <div class="p-lineup-info"><div class="p-lineup-title">${title}</div><div class="p-lineup-meta"><span class="p-lineup-source">${source}</span><span class="p-lineup-meta-text">${meta}</span></div><div class="p-lineup-state">${esc(status)}</div></div>
+      <button class="p-lineup-remove p-trash-btn" type="button" title="Remove from Lineup" aria-label="Remove from Lineup"><img src="icons/trash.svg" alt=""></button>
+    </div>`;
+  }).join('')}</div></div>`;
+  const listEl = el.querySelector('.p-lineup-list');
+  const updateRanks = () => {
+    listEl?.querySelectorAll('.p-lineup-card').forEach((node, i) => {
+      const rank = node.querySelector('.p-lineup-rank');
+      if (rank) rank.textContent = String(i + 1);
+    });
+  };
+  const persistDomOrder = () => {
+    const ids = [...listEl.querySelectorAll('.p-lineup-card')].map(node => node.dataset.id).filter(Boolean);
+    const ok = Store.reorderLineup ? Store.reorderLineup(ids) : false;
+    updateRanks();
+    return ok;
+  };
+  el.querySelectorAll('.p-lineup-card').forEach(card => {
+    const id = card.dataset.id;
+    card.addEventListener('click', ev => {
+      if (ev.target.closest('button') || ev.target.closest('.p-lineup-drag')) return;
+      const entry = Store.getLineup().find(x => x.id === id);
+      if (entry) showDetail(entry.tmdbId, entry.mediaType || (entry.type === 'movie' ? 'movie' : 'tv'), 'lineup');
+    });
+    const handle = card.querySelector('.p-lineup-drag');
+    handle?.addEventListener('mousedown', () => { card.draggable = true; });
+    handle?.addEventListener('touchstart', () => { card.draggable = true; }, { passive: true });
+    card.addEventListener('dragstart', ev => {
+      card.classList.add('dragging');
+      ev.dataTransfer.effectAllowed = 'move';
+      ev.dataTransfer.setData('text/plain', id);
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      card.draggable = false;
+      persistDomOrder();
+      renderPopupLineup();
+    });
+    card.addEventListener('dragover', ev => {
+      ev.preventDefault();
+      const dragging = listEl.querySelector('.p-lineup-card.dragging');
+      if (!dragging || dragging === card) return;
+      const rect = card.getBoundingClientRect();
+      const after = ev.clientY > rect.top + rect.height / 2;
+      listEl.insertBefore(dragging, after ? card.nextSibling : card);
+      updateRanks();
+    });
+    card.addEventListener('drop', ev => {
+      ev.preventDefault();
+      persistDomOrder();
+      renderPopupLineup();
+    });
+    card.querySelector('.p-lineup-remove')?.addEventListener('click', ev => { ev.stopPropagation(); Store.removeFromLineup(id); renderPopupLineup(); });
+  });
+}
+
 function enterDiaryMode() {
+  document.getElementById('pInlineSettings')?.classList.add('hidden');
+  document.getElementById('pList')?.classList.remove('hidden');
   pMode = 'diary';
   setPopupModeTabs('hidden');
   document.getElementById('pBack').classList.remove('hidden');
@@ -347,7 +578,8 @@ function enterDiaryMode() {
   document.getElementById('pSearchBtn').classList.add('hidden');
   document.getElementById('pAddNew')?.classList.add('hidden');
   document.getElementById('pDiaryBtn').classList.add('hidden');
-  document.getElementById('pRecBtn').classList.add('hidden');
+  document.getElementById('pLineupBtn')?.classList.add('hidden');
+  document.getElementById('pRecBtn')?.classList.add('hidden');
   document.getElementById('pEmpty').classList.add('hidden');
   renderPopupDiary();
 }
@@ -400,7 +632,7 @@ function renderPopupDiary() {
         </div>
         <div class="pd-tl-actions">
           <button class="pd-tl-edit" data-ts="${e.timestamp || ''}">Edit</button>
-          <button class="pd-tl-del" data-tmdb="${e.tmdbId}" data-ts="${e.timestamp || ''}">Remove</button>
+          <button class="pd-tl-del icon-only-sm trash" data-tmdb="${e.tmdbId}" data-ts="${e.timestamp || ''}" title="Remove" aria-label="Remove"><img src="icons/trash.svg" alt=""></button>
         </div>
       </div>`;
     });
@@ -431,7 +663,10 @@ function renderPopupDiary() {
   });
 }
 
-function enterTMDBMode(preserveQuery = false) {
+function enterTMDBMode(preserveQuery = false, source = pSearchSource || 'tmdb') {
+  document.getElementById('pInlineSettings')?.classList.add('hidden');
+  document.getElementById('pList')?.classList.remove('hidden');
+  pSearchSource = source === 'mal' ? 'mal' : 'tmdb';
   pMode = 'search';
   pReturnMode = 'search';
   document.getElementById('pBack').classList.remove('hidden');
@@ -440,13 +675,16 @@ function enterTMDBMode(preserveQuery = false) {
   document.getElementById('pSearchBtn').classList.add('hidden');
   document.getElementById('pAddNew')?.classList.add('hidden');
   document.getElementById('pDiaryBtn').classList.add('hidden');
-  document.getElementById('pRecBtn').classList.add('hidden');
+  document.getElementById('pLineupBtn')?.classList.add('hidden');
+  document.getElementById('pRecBtn')?.classList.add('hidden');
   document.getElementById('pEmpty').classList.add('hidden');
   const input = document.getElementById('pTmdbSearch');
   if (!preserveQuery) input.value = '';
   const el = document.getElementById('pList');
+  input.placeholder = pSearchSource === 'mal' ? 'Search anime on MyAnimeList...' : 'Search movies & TV on TMDB...';
+  setPopupModeTabs('search');
   if (!preserveQuery || !input.value.trim()) {
-    el.innerHTML = '<div class="p-search-msg">Type to search TMDB and MAL for movies, TV shows, and anime</div>';
+    el.innerHTML = `<div class="p-search-msg">${pSearchSource === 'mal' ? 'Search Anime / MAL separately from TMDB results.' : 'Search TMDB movies & TV separately from anime.'}</div>`;
   } else if (input.value.trim().length >= 2) {
     searchTMDB(input.value.trim());
   }
@@ -455,6 +693,8 @@ function enterTMDBMode(preserveQuery = false) {
 
 
 function enterRecommendationsMode(reset = false) {
+  document.getElementById('pInlineSettings')?.classList.add('hidden');
+  document.getElementById('pList')?.classList.remove('hidden');
   pMode = 'recommendations';
   setPopupModeTabs('hidden');
   pReturnMode = 'list';
@@ -464,7 +704,8 @@ function enterRecommendationsMode(reset = false) {
   document.getElementById('pSearchBtn').classList.add('hidden');
   document.getElementById('pAddNew')?.classList.add('hidden');
   document.getElementById('pDiaryBtn').classList.add('hidden');
-  document.getElementById('pRecBtn').classList.add('hidden');
+  document.getElementById('pLineupBtn')?.classList.add('hidden');
+  document.getElementById('pRecBtn')?.classList.add('hidden');
   document.getElementById('pEmpty').classList.add('hidden');
   const el = document.getElementById('pList');
   if (!reset && pRecCache.html) {
@@ -631,25 +872,29 @@ function applyPopupTheme() {
   let p;
   if (t.preset) {
     const presets = {
-      default: { bg0: '#0e1015', bg1: '#151820', bg2: '#1c2030', bg3: '#242a3a', accent: '#6c5ce7', accentL: '#a29bfe', text0: '#f0f2f5', text1: '#9ba0b5', text2: '#5c6180' },
-      midnight: { bg0: '#161b22', bg1: '#1c2129', bg2: '#21262d', bg3: '#30363d', accent: '#58a6ff', accentL: '#79c0ff', text0: '#e6edf3', text1: '#b1bac4', text2: '#6e7681' },
-      ocean: { bg0: '#112240', bg1: '#162b50', bg2: '#1d3a6a', bg3: '#254980', accent: '#64ffda', accentL: '#88ffea', text0: '#e6f1ff', text1: '#a8c0d8', text2: '#607b96' },
-      forest: { bg0: '#132413', bg1: '#1a2e1a', bg2: '#223b22', bg3: '#2d4a2d', accent: '#4ade80', accentL: '#86efac', text0: '#ecfdf5', text1: '#a7cfb0', text2: '#5c8a6a' },
-      sunset: { bg0: '#2d1515', bg1: '#3a1e1e', bg2: '#4a2828', bg3: '#5c3535', accent: '#f97316', accentL: '#fb923c', text0: '#fef2f2', text1: '#d4a0a0', text2: '#8a5555' },
-      sakura: { bg0: '#2a1525', bg1: '#351c30', bg2: '#42243d', bg3: '#522e4d', accent: '#f472b6', accentL: '#f9a8d4', text0: '#fdf2f8', text1: '#d4a0c0', text2: '#8a5578' },
-      nord: { bg0: '#3b4252', bg1: '#434c5e', bg2: '#4c566a', bg3: '#5a6478', accent: '#88c0d0', accentL: '#8fbcbb', text0: '#eceff4', text1: '#d8dee9', text2: '#81a1c1' },
-      light: { bg0: '#e8e8ed', bg1: '#dddde3', bg2: '#d0d0d8', bg3: '#c0c0cc', accent: '#6c5ce7', accentL: '#5a4bd4', text0: '#1a1a2e', text1: '#333355', text2: '#666688' },
+      default:  { bg0:'#08090c', bg1:'#0e1015', bg2:'#151820', bg3:'#1c2030', bg4:'#242a3a', accent:'#6c5ce7', accentL:'#a29bfe', text0:'#f5f7fb', text1:'#d2d7e2', text2:'#9aa3b7', text3:'#697189', border:'rgba(255,255,255,0.08)' },
+      midnight: { bg0:'#08090c', bg1:'#0e1015', bg2:'#151820', bg3:'#1c2030', bg4:'#242a3a', accent:'#6c5ce7', accentL:'#a29bfe', text0:'#f5f7fb', text1:'#d2d7e2', text2:'#9aa3b7', text3:'#697189', border:'rgba(255,255,255,0.08)' },
+      oled:     { bg0:'#000000', bg1:'#090909', bg2:'#121212', bg3:'#1a1a1a', bg4:'#242424', accent:'#d1d5db', accentL:'#f3f4f6', text0:'#e5e5e5', text1:'#a3a3a3', text2:'#737373', text3:'#525252', border:'rgba(255,255,255,0.08)' },
+      ocean:    { bg0:'#090e17', bg1:'#0f1623', bg2:'#151e2f', bg3:'#1c273c', bg4:'#25324a', accent:'#38bdf8', accentL:'#7dd3fc', text0:'#e2e8f0', text1:'#cbd5e1', text2:'#94a3b8', text3:'#64748b', border:'rgba(255,255,255,0.08)' },
+      nord:     { bg0:'#2e3440', bg1:'#3b4252', bg2:'#434c5e', bg3:'#4c566a', bg4:'#5e6980', accent:'#88c0d0', accentL:'#8fbcbb', text0:'#eceff4', text1:'#e5e9f0', text2:'#d8dee9', text3:'#aebad0', border:'rgba(255,255,255,0.1)' },
+      sakura:   { bg0:'#170f14', bg1:'#23161e', bg2:'#2d1b26', bg3:'#3a2231', bg4:'#492a3e', accent:'#f472b6', accentL:'#fbcfe8', text0:'#fae8f0', text1:'#dfb8ca', text2:'#b3869d', text3:'#876074', border:'rgba(255,255,255,0.08)' },
+      matcha:   { bg0:'#222622', bg1:'#2b302b', bg2:'#343a34', bg3:'#404740', bg4:'#4e574e', accent:'#a3e635', accentL:'#d9f99d', text0:'#e6ebe6', text1:'#c3cbc3', text2:'#95a195', text3:'#717d71', border:'rgba(255,255,255,0.08)' },
+      cloud:    { bg0:'#f8fafc', bg1:'#f1f5f9', bg2:'#e2e8f0', bg3:'#cbd5e1', bg4:'#94a3b8', accent:'#3b82f6', accentL:'#2563eb', text0:'#0f172a', text1:'#1e293b', text2:'#334155', text3:'#475569', border:'rgba(0,0,0,0.1)' },
+      latte:    { bg0:'#faf4ed', bg1:'#f3e8da', bg2:'#e6d5c3', bg3:'#d4bca4', bg4:'#c2a487', accent:'#d97706', accentL:'#b45309', text0:'#453a35', text1:'#5c4c45', text2:'#7a685f', text3:'#99857a', border:'rgba(0,0,0,0.08)' },
     };
     p = presets[t.preset];
   } else if (t.custom) {
-    p = { bg0: t.custom.bg0, bg1: t.custom.bg1, bg2: t.custom.bg2, bg3: t.custom.bg3, accent: t.custom.accent, accentL: t.custom.accentL, text0: t.custom.text0, text1: t.custom.text1, text2: t.custom.text2 };
+    p = { bg0: t.custom.bg0, bg1: t.custom.bg1, bg2: t.custom.bg2, bg3: t.custom.bg3, bg4: t.custom.bg4, accent: t.custom.accent, accentL: t.custom.accentL, text0: t.custom.text0, text1: t.custom.text1, text2: t.custom.text2, text3: t.custom.text3, border: t.custom.border };
   }
   if (p) {
     r.setProperty('--pbg-0', p.bg0); r.setProperty('--pbg-1', p.bg1);
-    r.setProperty('--pbg-2', p.bg2); r.setProperty('--pbg-3', p.bg3);
+    r.setProperty('--pbg-2', p.bg2); r.setProperty('--pbg-3', p.bg3); if (p.bg4) r.setProperty('--pbg-4', p.bg4);
     r.setProperty('--paccent', p.accent); r.setProperty('--paccent-l', p.accentL);
     r.setProperty('--ptext-0', p.text0); r.setProperty('--ptext-1', p.text1);
-    r.setProperty('--ptext-2', p.text2);
+    r.setProperty('--ptext-2', p.text2); if (p.text3) r.setProperty('--ptext-3', p.text3);
+    if (p.border) r.setProperty('--pborder', p.border);
+    r.setProperty('--text-color', p.text0);
+    r.setProperty('--accent-color', p.accent);
     document.body.style.background = p.bg0;
   }
 }
@@ -673,12 +918,15 @@ function renderList() {
     }
     items = items.filter(i => (i.title || '').toLowerCase().includes(pQuery));
   } else {
+    const isAnimeItem = (i) => i.sourceTag === 'anime' || i.mediaKind === 'anime' || i.malId;
     if (pFilter !== 'all') items = items.filter(i => i.watchStatus === pFilter);
+    if (pSource === 'tmdb') items = items.filter(i => !isAnimeItem(i));
+    if (pSource === 'anime') items = items.filter(i => isAnimeItem(i));
     if (pType !== 'all') items = items.filter(i => i.mediaType === pType);
     if (pQuery) items = items.filter(i => (i.title || '').toLowerCase().includes(pQuery));
   }
 
-  const typePri = (i) => i.mediaType === 'tv' ? 0 : 1;
+  const typePri = (i) => (i.sourceTag === 'anime' || i.mediaKind === 'anime' || i.malId) ? 0 : (i.mediaType === 'tv' ? 1 : 2);
   switch (pSort) {
     case 'title': items.sort((a, b) => a.title.localeCompare(b.title) || typePri(a) - typePri(b)); break;
     case 'year': items.sort((a, b) => (b.year || 0) - (a.year || 0) || typePri(a) - typePri(b)); break;
@@ -708,7 +956,7 @@ function renderList() {
       return `<div class="p-item" data-tmdb="${i.tmdbId}" data-type="${i.mediaType}">
         <div class="p-poster">${img ? `<img src="${img}">` : `<div class="p-poster-ph">${i.mediaType === 'movie' ? 'MOV' : 'TV'}</div>`}</div>
         <div class="p-info"><div class="p-title">${esc(i.title)}</div>
-          <div class="p-meta">${i.mediaType === 'movie' ? 'Movie' : 'TV'} · ${i.year || ''}</div>
+          <div class="p-meta">${(i.sourceTag === 'anime' || i.mediaKind === 'anime' || i.malId) ? 'Anime / MAL' : (i.mediaType === 'movie' ? 'TMDB Movie' : 'TMDB TV')} · ${i.year || ''}</div>
           <div class="p-bar-wrap"><div class="p-bar"><div class="p-bar-fill ${f}" style="width:${pct}%"></div></div></div></div>
         <div class="p-right">${eps ? `<div class="p-eps">${eps}</div>` : ''}${score ? `<div class="p-score">${score}</div>` : ''}</div></div>`;
     }).join('');
@@ -764,7 +1012,7 @@ function bindPopupQuickLinks(root) {
 function buildStatusDropdownHTML(currentVal, idPrefix) {
   const entries = [
     { val: 'watching', label: 'Watching', color: '#00b894' },
-    { val: 'completed', label: 'Completed', color: '#6c5ce7' },
+    { val: 'completed', label: 'Completed', color: '#8B5CF6' },
     { val: 'on_hold', label: 'On-Hold', color: '#fdcb6e' },
     { val: 'dropped', label: 'Dropped', color: '#e17055' },
     { val: 'plan_to_watch', label: 'Plan to Watch', color: '#a29bfe' },
@@ -798,7 +1046,7 @@ function bindDetailStatusDD(idPrefix, tmdbId, mediaType, title, posterPath) {
   menu.querySelectorAll('.p-dd-item').forEach(item => {
     item.addEventListener('click', () => {
       const val = item.dataset.val;
-      const cfg = { watching: { l: 'Watching', c: '#00b894' }, completed: { l: 'Completed', c: '#6c5ce7' }, on_hold: { l: 'On-Hold', c: '#fdcb6e' }, dropped: { l: 'Dropped', c: '#e17055' }, plan_to_watch: { l: 'Plan to Watch', c: '#a29bfe' } };
+      const cfg = { watching: { l: 'Watching', c: '#00b894' }, completed: { l: 'Completed', c: '#8B5CF6' }, on_hold: { l: 'On-Hold', c: '#fdcb6e' }, dropped: { l: 'Dropped', c: '#e17055' }, plan_to_watch: { l: 'Plan to Watch', c: '#a29bfe' } };
       const c = cfg[val] || cfg.watching;
       document.getElementById(`${idPrefix}Label`).textContent = c.l;
       document.getElementById(`${idPrefix}Dot`).style.background = c.c;
@@ -826,7 +1074,8 @@ async function showDetail(tmdbId, mediaType, returnMode = 'list') {
   document.getElementById('pAddNew')?.classList.add('hidden');
   document.getElementById('pSearchBtn').classList.add('hidden');
   document.getElementById('pDiaryBtn').classList.add('hidden');
-  document.getElementById('pRecBtn').classList.add('hidden');
+  document.getElementById('pLineupBtn')?.classList.add('hidden');
+  document.getElementById('pRecBtn')?.classList.add('hidden');
   document.getElementById('pEmpty').classList.add('hidden');
 
   const isM = mediaType === 'movie';
@@ -884,7 +1133,7 @@ async function showDetail(tmdbId, mediaType, returnMode = 'list') {
     } else {
       // TMDB TV: per-season progress with per-season status dropdown
       const seasonStatuses = stored.seasonStatuses || {};
-      const seasonStatusColors = { watching:'#00b894', completed:'#6c5ce7', on_hold:'#fdcb6e', dropped:'#e17055', plan_to_watch:'#a29bfe', not_started:'#5c6180' };
+      const seasonStatusColors = { watching:'#00b894', completed:'#8B5CF6', on_hold:'#fdcb6e', dropped:'#e17055', plan_to_watch:'#a29bfe', not_started:'#5c6180' };
       const ssOpts = [
         { val:'not_started', label:'—' }, { val:'watching', label:'Watching' },
         { val:'completed', label:'Completed' }, { val:'on_hold', label:'On-Hold' },
@@ -1030,10 +1279,11 @@ async function showDetail(tmdbId, mediaType, returnMode = 'list') {
       ${buildStatusDropdownHTML(stored.watchStatus, 'pdSt')}
     </div>
     ${seasonHtml}
-    <div class="pd-actions">
-      <button class="pd-btn pd-btn-open" id="pdOpenFull">Full Details</button>
-      <button class="pd-btn pd-btn-diary" id="pdDiaryLog">Diary</button>
-      <button class="pd-btn pd-btn-remove" id="pdRemove">Remove</button>
+    <div class="pd-actions pd-icon-actions">
+      <button class="pd-btn pd-btn-open pd-icon-action" id="pdOpenFull" title="Open full details" aria-label="Open full details"><img src="icons/external.svg" alt=""></button>
+      <button class="pd-btn pd-btn-lineup pd-icon-action" id="pdLineup" title="Add to Lineup" aria-label="Add to Lineup"><img src="icons/lineup.svg" alt=""></button>
+      <button class="pd-btn pd-btn-diary pd-icon-action" id="pdDiaryLog" title="Log Diary" aria-label="Log Diary"><img src="icons/diary.svg" alt=""></button>
+      <button class="pd-btn pd-btn-remove pd-icon-action" id="pdRemove" title="Remove from list" aria-label="Remove from list"><img src="icons/trash.svg" alt=""></button>
     </div>
     ${relatedHtml}
   </div>`;
@@ -1156,6 +1406,11 @@ async function showDetail(tmdbId, mediaType, returnMode = 'list') {
     chrome.tabs.create({ url: chrome.runtime.getURL('app.html') + `#detail-${mediaType}-${tmdbId}` }); window.close();
   });
 
+  el.querySelector('#pdLineup')?.addEventListener('click', () => {
+    const added = Store.addToLineup({ ...stored, mediaType }, { targetType: mediaType === 'movie' ? 'movie' : 'show' });
+    alert(added ? 'Added to Lineup' : 'Already in Lineup');
+  });
+
   el.querySelector('#pdDiaryLog')?.addEventListener('click', () => {
     popupDiaryLogModal(tmdbId, mediaType, stored.title, stored.posterPath);
   });
@@ -1237,40 +1492,33 @@ async function popupAddTmdbToList(tmdbId, mediaType) {
 async function searchTMDB(query) {
   pLastSearchQuery = (query || '').trim();
   const el = document.getElementById('pList');
-  el.innerHTML = '<div class="p-search-msg">Searching TMDB + MAL...</div>';
+  const source = pSearchSource === 'mal' ? 'mal' : 'tmdb';
+  el.innerHTML = `<div class="p-search-msg">Searching ${source === 'mal' ? 'Anime / MAL' : 'TMDB'}...</div>`;
 
   try {
-    const [tmdbRes, malRes] = await Promise.allSettled([
-      TMDB.getKey() ? TMDB.search(query) : Promise.resolve([]),
-      searchMALAnime(query),
-    ]);
-    const tmdbResults = tmdbRes.status === 'fulfilled' ? tmdbRes.value : [];
-    const malResults = malRes.status === 'fulfilled' ? malRes.value : [];
-
     const rows = [];
-    tmdbResults.forEach(r => rows.push({ source: 'tmdb', data: r }));
-    malResults.forEach(r => rows.push({ source: 'mal', data: r }));
+    if (source === 'mal') {
+      const malResults = await searchMALAnime(query);
+      malResults.forEach(r => rows.push({ source: 'mal', data: r }));
+    } else {
+      if (!TMDB.getKey()) {
+        el.innerHTML = '<div class="p-search-msg">Set your TMDB API key in Settings before searching TMDB.</div>';
+        return;
+      }
+      const tmdbResults = await TMDB.search(query);
+      tmdbResults.forEach(r => rows.push({ source: 'tmdb', data: r }));
+    }
 
     if (!rows.length) {
-      const tmdbErr = tmdbRes.status === 'rejected' ? tmdbRes.reason?.message : '';
-      const malErr = malRes.status === 'rejected' ? malRes.reason?.message : '';
-      const errText = [tmdbErr, malErr].filter(Boolean).join(' · ');
-      el.innerHTML = `<div class="p-search-msg">No results found${errText ? ` (${esc(errText)})` : ''}</div>`;
+      el.innerHTML = `<div class="p-search-msg">No ${source === 'mal' ? 'Anime / MAL' : 'TMDB'} results found.</div>`;
       return;
     }
 
-    // Keep TMDB and MAL identities separate, but interleave them so the popup shows
-    // both the TMDB live-action/adaptation rows and the MAL anime rows immediately.
-    const tmdbRows = rows.filter(r => r.source === 'tmdb');
-    const malRows = rows.filter(r => r.source === 'mal');
-    const blendedRows = [];
-    const maxRows = Math.max(tmdbRows.length, malRows.length);
-    for (let i = 0; i < maxRows; i += 1) {
-      if (tmdbRows[i]) blendedRows.push(tmdbRows[i]);
-      if (malRows[i]) blendedRows.push(malRows[i]);
-    }
+    const header = source === 'mal'
+      ? '<div class="p-result-section-title">Anime / MAL results</div>'
+      : '<div class="p-result-section-title">TMDB movie & TV results</div>';
 
-    el.innerHTML = blendedRows.slice(0, 18).map(row => {
+    el.innerHTML = header + rows.slice(0, 18).map(row => {
       if (row.source === 'mal') {
         const r = row.data;
         const malId = Number(r.mal_id);
@@ -1284,8 +1532,8 @@ async function searchTMDB(query) {
         return `<div class="p-search-item" data-source="mal" data-mal-id="${malId}">
           <div class="p-poster">${poster ? `<img src="${poster}">` : `<div class="p-poster-ph">MAL</div>`}</div>
           <div class="p-search-info"><div class="p-search-title">${esc(title)}</div>
-            <div class="p-search-sub">MAL Anime · ${esc(r.type || (isMovie ? 'Movie' : 'TV'))}${yr ? ` · ${yr}` : ''}${score}${eps}</div></div>
-          <span class="p-search-type p-search-type-${isMovie ? 'movie' : 'tv'}">MAL</span>
+            <div class="p-search-sub">Anime / MAL · ${esc(r.type || (isMovie ? 'Movie' : 'TV'))}${yr ? ` · ${yr}` : ''}${score}${eps}</div></div>
+          <span class="p-search-type p-search-type-anime">Anime</span>
           <div class="p-search-actions">
             ${inList ? `<button class="p-add-btn added" disabled>In List</button>` : `<button class="p-add-btn" data-action="add">+ Add</button>`}
           </div>
@@ -1312,8 +1560,18 @@ async function searchTMDB(query) {
     el.querySelectorAll('.p-search-item').forEach(item => {
       const source = item.dataset.source;
       const openDetails = () => {
-        if (source === 'mal') showMALDetail(parseInt(item.dataset.malId), 'search');
-        else showTMDBDetail(parseInt(item.dataset.id), item.dataset.type, 'search');
+        if (source === 'mal') {
+          const malId = Number(item.dataset.malId);
+          const stored = (Store.getTvShowByMalId && Store.getTvShowByMalId(malId)) || Store.getMovies().find(m => Number(m.malId) === malId);
+          if (stored) showDetail(stored.tmdbId, stored.mediaType || (stored.mediaKind === 'movie' ? 'movie' : 'tv'), 'search');
+          else showMALDetail(malId, 'search');
+          return;
+        }
+        const tmdbId = Number(item.dataset.id);
+        const mediaType = item.dataset.type;
+        const stored = mediaType === 'movie' ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
+        if (stored) showDetail(tmdbId, mediaType, 'search');
+        else showTMDBDetail(tmdbId, mediaType, 'search');
       };
       const addBtn = item.querySelector('[data-action="add"]');
       if (addBtn) {
@@ -1373,7 +1631,7 @@ async function popupAddMalToList(malId) {
     externalIds: [{ provider: 'mal', providerType: 'anime', id: Number(malId), relation: 'primary' }],
     title,
     posterPath: poster,
-    backdropPath: anime.trailer?.images?.maximum_image_url || anime.trailer?.images?.large_image_url || null,
+    backdropPath: await popupMALLandscapeBackdrop(anime, malId),
     year,
     voteAverage: score,
     genres,
@@ -1407,6 +1665,13 @@ async function popupAddMalToList(malId) {
 }
 
 async function showMALDetail(malId, returnMode = 'search') {
+  const existingTv = Store.getTvShowByMalId ? Store.getTvShowByMalId(Number(malId)) : null;
+  const existingMovie = Store.getMovies().find(m => Number(m.malId) === Number(malId));
+  const existing = existingTv || existingMovie;
+  if (existing) {
+    showDetail(existing.tmdbId, existing.mediaType || (existingMovie ? 'movie' : 'tv'), returnMode || 'search');
+    return;
+  }
   pMode = 'detail';
   setPopupModeTabs('hidden');
   pReturnMode = returnMode || 'search';
@@ -1416,7 +1681,8 @@ async function showMALDetail(malId, returnMode = 'search') {
   document.getElementById('pAddNew')?.classList.add('hidden');
   document.getElementById('pSearchBtn').classList.add('hidden');
   document.getElementById('pDiaryBtn').classList.add('hidden');
-  document.getElementById('pRecBtn').classList.add('hidden');
+  document.getElementById('pLineupBtn')?.classList.add('hidden');
+  document.getElementById('pRecBtn')?.classList.add('hidden');
   const el = document.getElementById('pList');
   el.innerHTML = '<div class="p-search-msg">Loading MAL details...</div>';
 
@@ -1462,8 +1728,8 @@ async function showMALDetail(malId, returnMode = 'search') {
       ${relatedHtml}
       ${renderPopupQuickLinks(title)}
       <div class="pd-actions">
-        <button class="pd-btn pd-btn-open" id="pdOpenFull">Full Details</button>
-        ${inList ? '' : `<button class="pd-btn pd-btn-add" id="pdAddMal">+ Add to List</button>`}
+        <button class="pd-btn pd-btn-open pd-icon-action" id="pdOpenFull" title="Open full details" aria-label="Open full details"><img src="icons/external.svg" alt=""></button>
+        ${inList ? '' : `<button class="pd-btn pd-btn-add pd-icon-action" id="pdAddMal" title="Add to Watchlist" aria-label="Add to Watchlist"><img src="icons/watchlist.svg" alt=""></button>`}
       </div>
       <div class="pd-links"><a href="https://myanimelist.net/anime/${malId}" target="_blank">↗ MAL</a></div>
     </div>`;
@@ -1489,6 +1755,11 @@ async function showMALDetail(malId, returnMode = 'search') {
 }
 
 async function showTMDBDetail(tmdbId, mediaType, returnMode = 'list') {
+  const existing = mediaType === 'movie' ? Store.getMovie(tmdbId) : Store.getTvShow(tmdbId);
+  if (existing) {
+    showDetail(tmdbId, mediaType, returnMode || 'search');
+    return;
+  }
   pMode = 'detail';
   setPopupModeTabs('hidden');
   pReturnMode = returnMode || 'list';
@@ -1498,7 +1769,8 @@ async function showTMDBDetail(tmdbId, mediaType, returnMode = 'list') {
   document.getElementById('pAddNew')?.classList.add('hidden');
   document.getElementById('pSearchBtn').classList.add('hidden');
   document.getElementById('pDiaryBtn').classList.add('hidden');
-  document.getElementById('pRecBtn').classList.add('hidden');
+  document.getElementById('pLineupBtn')?.classList.add('hidden');
+  document.getElementById('pRecBtn')?.classList.add('hidden');
   const el = document.getElementById('pList');
   el.innerHTML = '<div class="p-search-msg">Loading...</div>';
 
@@ -1540,8 +1812,8 @@ async function showTMDBDetail(tmdbId, mediaType, returnMode = 'list') {
       ${castHtml}
       ${renderPopupQuickLinks(title)}
       <div class="pd-actions">
-        <button class="pd-btn pd-btn-open" id="pdOpenFull">Full Details</button>
-        ${inList ? '' : `<button class="pd-btn pd-btn-add" id="pdAdd">+ Add to List</button>`}
+        <button class="pd-btn pd-btn-open pd-icon-action" id="pdOpenFull" title="Open full details" aria-label="Open full details"><img src="icons/external.svg" alt=""></button>
+        ${inList ? '' : `<button class="pd-btn pd-btn-add pd-icon-action" id="pdAdd" title="Add to Watchlist" aria-label="Add to Watchlist"><img src="icons/watchlist.svg" alt=""></button>`}
       </div>
       <div class="pd-links">
         <a href="https://www.themoviedb.org/${isM ? 'movie' : 'tv'}/${d.id}" target="_blank">&#8599; TMDB</a>
@@ -1619,7 +1891,7 @@ function popupDiaryLogModal(tmdbId, mediaType, title, posterPath) {
     const notes = m.querySelector('#pdlNotes').value.trim();
     const rating = parseInt(m.querySelector('#pdlRating').value) || null;
     const season = !isM && m.querySelector('#pdlSeason') ? parseInt(m.querySelector('#pdlSeason').value) || null : null;
-    Store.addDiaryEntry({ tmdbId, title, type: mediaType, posterPath, date, action, notes, rating, mood: null, episodes: null, season, timestamp: new Date().toISOString() });
+    Store.addDiaryEntry({ mediaId: st?.mediaId || null, tmdbId, malId: st?.malId || null, title, type: mediaType, posterPath, date, action, notes, rating, mood: null, episodes: null, season, timestamp: new Date().toISOString(), syncSource: 'manual' });
     close();
     if (pMode === 'diary') renderPopupDiary();
     else showDetail(tmdbId, mediaType);
@@ -1656,6 +1928,173 @@ function popupEditDiaryEntry(timestamp) {
     });
     close();
     if (pMode === 'diary') renderPopupDiary();
+  });
+}
+
+
+
+function popupClampHex(hex, fallback) {
+  const v = String(hex || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
+}
+
+function popupHexToRgb(hex) {
+  const n = parseInt(String(hex).replace('#', ''), 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+function popupRgbToHex({ r, g, b }) {
+  const h = (x) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0');
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+
+function popupMix(hex, amt) {
+  const c = popupHexToRgb(hex);
+  const target = amt >= 0 ? 255 : 0;
+  const p = Math.abs(amt) / 100;
+  return popupRgbToHex({ r: c.r + (target - c.r) * p, g: c.g + (target - c.g) * p, b: c.b + (target - c.b) * p });
+}
+
+function popupCustomThemeVars({ bg, surface, accent, text }) {
+  bg = popupClampHex(bg, '#130F1C');
+  surface = popupClampHex(surface, '#1E182D');
+  accent = popupClampHex(accent, '#8B5CF6');
+  text = popupClampHex(text, '#F8F8F2');
+  return {
+    bg0: bg,
+    bg1: popupMix(bg, 8),
+    bg2: surface,
+    bg3: popupMix(surface, 10),
+    bg4: popupMix(surface, 20),
+    accent,
+    accentL: popupMix(accent, 20),
+    text0: text,
+    text1: popupMix(text, -15),
+    text2: popupMix(text, -35),
+    text3: popupMix(text, -55),
+    border: 'rgba(255,255,255,0.08)',
+  };
+}
+
+function enterPopupSettingsMode() {
+  pMode = 'settings';
+  setPopupModeTabs('hidden');
+  hidePopupSearchPage();
+  document.getElementById('pBack').classList.remove('hidden');
+  document.getElementById('pControls').classList.add('hidden');
+  document.getElementById('pSearchBtn').classList.add('hidden');
+  document.getElementById('pAddNew')?.classList.add('hidden');
+  document.getElementById('pDiaryBtn').classList.add('hidden');
+  document.getElementById('pLineupBtn')?.classList.add('hidden');
+  document.getElementById('pRecBtn')?.classList.add('hidden');
+  document.getElementById('pEmpty').classList.add('hidden');
+  document.getElementById('pList').classList.add('hidden');
+  const panel = document.getElementById('pInlineSettings');
+  document.querySelector('.p-footer')?.classList.add('hidden');
+  panel.classList.remove('hidden');
+  chrome.storage.local.get(['syncConfig', 'lastBackgroundSync'], ({ syncConfig = {}, lastBackgroundSync = null }) => {
+    const savedTheme = Store.getTheme() || { preset: 'midnight' };
+    const lastSummary = lastBackgroundSync?.finishedAt
+      ? `Last background sync: ${new Date(lastBackgroundSync.finishedAt).toLocaleString()} · +${lastBackgroundSync.added || 0} added, ${lastBackgroundSync.updated || 0} updated, ${lastBackgroundSync.diaryAdded || 0} diary`
+      : 'No background sync has run yet.';
+    const themeOptions = [['midnight','Midnight (Default)'],['oled','OLED Black'],['ocean','Deep Ocean'],['nord','Nord'],['sakura','Sakura Night'],['matcha','Matcha'],['cloud','Cloud'],['latte','Latte'],['custom','Custom']];
+    const themeValue = savedTheme.custom ? 'custom' : (savedTheme.preset || 'midnight');
+    const c = savedTheme.custom || {};
+    panel.innerHTML = `<div class="pis-wrap">
+      <div class="pis-head"><div><h2>Settings</h2><p>Quick controls only. Full setup stays in More Settings.</p></div></div>
+
+      <div class="pis-card">
+        <label>Theme</label>
+        <select id="pisTheme">
+          ${themeOptions.map(([v,l]) => `<option value="${v}" ${themeValue===v?'selected':''}>${l}</option>`).join('')}
+        </select>
+        <div id="pisCustomTheme" class="pis-custom-theme ${themeValue === 'custom' ? '' : 'hidden'}">
+          <div class="pis-color-row"><label>Background<input id="pisBg" type="color" value="${esc(c.bg0 || '#130F1C')}"></label><label>Surface<input id="pisSurface" type="color" value="${esc(c.bg2 || '#1E182D')}"></label></div>
+          <div class="pis-color-row"><label>Accent<input id="pisAccent" type="color" value="${esc(c.accent || '#8B5CF6')}"></label><label>Text<input id="pisText" type="color" value="${esc(c.text0 || '#F8F8F2')}"></label></div>
+          <button id="pisApplyCustom" type="button" class="pis-secondary-full">Apply custom theme</button>
+        </div>
+      </div>
+
+      <div class="pis-card">
+        <label>Sync</label>
+        <div class="pis-sync-grid">
+          <button id="pisSyncLetterboxd" type="button">Sync Letterboxd</button>
+          <button id="pisSyncMal" type="button">Sync MAL</button>
+        </div>
+        <button id="pisSyncNow" type="button" class="pis-secondary-full pis-sync-all">Sync All</button>
+        <div class="pis-note">Usernames, API keys, and MAL login are managed from More Settings.</div>
+      </div>
+
+      <div class="pis-card">
+        <label>Auto-sync interval</label>
+        <select id="pisInterval">
+          ${[[0,'Off'],[30,'Every 30 minutes'],[60,'Hourly'],[180,'Every 3 hours'],[360,'Every 6 hours'],[720,'Every 12 hours'],[1440,'Daily']].map(([v,l]) => `<option value="${v}" ${Number(syncConfig.syncInterval || 0)===v?'selected':''}>${l}</option>`).join('')}
+        </select>
+        <div class="pis-last pis-last-plain">${esc(lastSummary)}</div>
+      </div>
+
+      <div id="pisStatus" class="pis-status"></div>
+      <div class="pis-footer"><button id="pisOpenFull" type="button">More Settings</button><span></span><button id="pisOpenDashboard" type="button">Open Full Dashboard ↗</button></div>
+      <div class="pis-actions"><button id="pisSave">Save</button></div>
+    </div>`;
+
+    const applyCustomFromPopup = () => {
+      const vars = popupCustomThemeVars({
+        bg: panel.querySelector('#pisBg')?.value,
+        surface: panel.querySelector('#pisSurface')?.value,
+        accent: panel.querySelector('#pisAccent')?.value,
+        text: panel.querySelector('#pisText')?.value,
+      });
+      const current = Store.getTheme() || {};
+      Store.setTheme({ ...current, preset: null, custom: vars });
+      applyPopupTheme();
+    };
+
+    panel.querySelector('#pisTheme').addEventListener('change', e => {
+      const current = Store.getTheme() || {};
+      const customBox = panel.querySelector('#pisCustomTheme');
+      if (e.target.value === 'custom') {
+        customBox?.classList.remove('hidden');
+        applyCustomFromPopup();
+      } else {
+        customBox?.classList.add('hidden');
+        Store.setTheme({ ...current, preset: e.target.value, custom: null });
+        applyPopupTheme();
+      }
+    });
+    panel.querySelector('#pisApplyCustom')?.addEventListener('click', applyCustomFromPopup);
+    panel.querySelectorAll('#pisBg,#pisSurface,#pisAccent,#pisText').forEach(input => input.addEventListener('input', () => {
+      if (panel.querySelector('#pisTheme')?.value === 'custom') applyCustomFromPopup();
+    }));
+
+    panel.querySelector('#pisSave').addEventListener('click', () => {
+      chrome.storage.local.set({ syncConfig: {
+        ...syncConfig,
+        syncInterval: Number(panel.querySelector('#pisInterval').value || 0),
+      }}, () => {
+        chrome.runtime.sendMessage({ type: 'watchtracker:refresh-sync-alarm' }, () => {});
+        panel.querySelector('#pisStatus').textContent = 'Saved. Auto-sync schedule refreshed.';
+      });
+    });
+
+    const runPopupSync = (source, label) => {
+      const status = panel.querySelector('#pisStatus');
+      status.textContent = `Syncing ${label} in background...`;
+      chrome.runtime.sendMessage({ type: 'watchtracker:run-sync-now', source }, res => {
+        const body = res?.body;
+        status.textContent = body ? `${label} done: ${body.added || 0} added, ${body.updated || 0} updated, ${body.diaryAdded || 0} diary entries${body.errors?.length ? ' · ' + body.errors.join(' · ') : ''}` : `${label} sync request failed.`;
+      });
+    };
+
+    panel.querySelector('#pisSyncLetterboxd').addEventListener('click', () => runPopupSync('letterboxd', 'Letterboxd'));
+    panel.querySelector('#pisSyncMal').addEventListener('click', () => runPopupSync('mal', 'MAL'));
+    panel.querySelector('#pisSyncNow').addEventListener('click', () => runPopupSync('all', 'All sources'));
+    panel.querySelector('#pisOpenFull').addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('app.html') + '#settings' }); window.close();
+    });
+    panel.querySelector('#pisOpenDashboard')?.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('app.html') }); window.close();
+    });
   });
 }
 

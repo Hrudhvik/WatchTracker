@@ -838,7 +838,9 @@ const DiaryUI = {
       const notes = modal.querySelector('#diaryEntryNotes').value.trim();
 
       const entry = {
+        mediaId: item.mediaId || null,
         tmdbId: item.tmdbId,
+        malId: item.malId || null,
         title: item.title,
         type: item.type,
         posterPath: item.posterPath,
@@ -849,6 +851,7 @@ const DiaryUI = {
         mood: selectedMood || null,
         episodes: null,
         timestamp: new Date().toISOString(),
+        syncSource: 'manual',
       };
 
       Store.addDiaryEntry(entry);

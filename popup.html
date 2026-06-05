@@ -1,39 +1,52 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="theme-pending">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WatchTracker</title>
+  <script src="early-theme.js"></script>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <header id="popupHeader">
     <div class="p-top">
-      <button id="pBack" class="p-icon-btn hidden" title="Back">&#8592;</button>
-      <div class="p-logo"><div class="p-logo-mark">&#9654;</div><span>WatchTracker</span></div>
-      <button id="pSearchBtn" class="p-icon-btn p-search-open-btn" title="Search TMDB + MAL">&#128269;</button>
+      <button id="pBack" class="p-icon-btn hidden" title="Back"><img src="icons/back.svg" alt=""></button>
+      <div class="p-logo"><div class="p-logo-mark"><img src="icons/logo.svg" alt=""></div><span class="brand-text"><span class="brand-watch">Watch</span><span class="brand-tracker">Tracker</span></span></div>
       <div class="p-top-btns">
-        <button id="pDiaryBtn" class="p-icon-btn p-diary-btn" title="Diary">D</button>
-        <button id="pRecBtn" class="p-icon-btn p-rec-btn" title="Recommendations">★</button>
-        <button id="pSettings" class="p-icon-btn" title="Settings">&#9881;</button>
-        <button id="pClose" class="p-icon-btn" title="Close">&#10005;</button>
+        <button id="pSearchBtn" class="p-icon-btn p-search-open-btn" title="Search TMDB or Anime / MAL"><img src="icons/search.svg" alt=""></button>
+        <button id="pLineupBtn" class="p-icon-btn" title="Lineup"><img src="icons/lineup.svg" alt=""></button>
+        <button id="pDiaryBtn" class="p-icon-btn p-diary-btn" title="Diary"><img src="icons/diary.svg" alt=""></button>
+        <button id="pSettings" class="p-icon-btn" title="Settings"><img src="icons/settings.svg" alt=""></button>
+        <button id="pClose" class="p-icon-btn" title="Close"><img src="icons/close.svg" alt=""></button>
       </div>
     </div>
     <section class="p-search-page hidden" id="pSearchPage" aria-label="Search">
       <div class="p-mode-switch" id="pModeSwitch" role="tablist" aria-label="Popup search mode">
-        <button id="pModeExternal" class="p-mode-tab active" type="button">TMDB + MAL</button>
+        <button id="pModeExternal" class="p-mode-tab active" type="button">TMDB</button>
+        <button id="pModeAnime" class="p-mode-tab" type="button">Anime / MAL</button>
         <button id="pModeLibrary" class="p-mode-tab" type="button">My List</button>
       </div>
       <div class="p-search-panel">
         <input type="text" id="pSearch" placeholder="Search your list..." autocomplete="off">
-        <input type="text" id="pTmdbSearch" class="hidden" placeholder="Search TMDB + MAL..." autocomplete="off">
+        <input type="text" id="pTmdbSearch" class="hidden" placeholder="Search movies & TV on TMDB..." autocomplete="off">
       </div>
     </section>
     <div class="p-controls" id="pControls">
-      <div class="p-type-toggle">
-        <button class="p-type active" data-type="all">All</button>
-        <button class="p-type" data-type="movie">Movies</button>
-        <button class="p-type" data-type="tv">TV</button>
+      <div class="p-filter-group" aria-label="Source filter">
+        <span class="p-filter-label">Source</span>
+        <div class="p-type-toggle p-source-toggle">
+          <button class="p-source active" data-source="all">All</button>
+          <button class="p-source" data-source="tmdb">TMDB</button>
+          <button class="p-source" data-source="anime">Anime / MAL</button>
+        </div>
+      </div>
+      <div class="p-filter-group" aria-label="Type filter">
+        <span class="p-filter-label">Type</span>
+        <div class="p-type-toggle">
+          <button class="p-type active" data-type="all">All</button>
+          <button class="p-type" data-type="movie">Movies</button>
+          <button class="p-type" data-type="tv">TV</button>
+        </div>
       </div>
       <div class="p-status-dd" id="pStatusDD">
         <button class="p-status-pill" id="pStatusBtn">
@@ -68,6 +81,7 @@
       </div>
     </div>
   </header>
+  <section id="pInlineSettings" class="p-inline-settings hidden" aria-label="Settings"></section>
   <main id="pList"></main>
   <div id="pEmpty" class="p-empty hidden">
     <p>No items</p>

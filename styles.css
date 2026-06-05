@@ -9,15 +9,17 @@
   --bg-2: #151820;
   --bg-3: #1c2030;
   --bg-4: #242a3a;
-  --border: rgba(255,255,255,0.06);
-  --border-active: rgba(255,255,255,0.12);
-  --text-0: #f0f2f5;
-  --text-1: #c0c5d0;
-  --text-2: #7a8194;
-  --text-3: #4a5068;
+  --border: rgba(255,255,255,0.08);
+  --border-active: rgba(255,255,255,0.14);
+  --text-0: #f5f7fb;
+  --text-1: #d2d7e2;
+  --text-2: #9aa3b7;
+  --text-3: #697189;
   --accent: #6c5ce7;
   --accent-light: #a29bfe;
   --accent-glow: rgba(108,92,231,0.15);
+  --text-color: var(--text-0);
+  --accent-color: var(--accent);
   --watching: #00b894;
   --plan: #74b9ff;
   --completed: #6c5ce7;
@@ -32,6 +34,8 @@
   --mono: 'JetBrains Mono', monospace;
 }
 
+html.theme-pending { background: var(--pbg-0, var(--bg-0, #08090c)); }
+html.theme-pending body { visibility: hidden; }
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body {
@@ -3841,4 +3845,412 @@ kbd {
 
 .settings-modal-box .settings-line-toggle .field-hint {
   font-size: 12px;
+}
+
+
+/* Source separation controls */
+.list-filter-stack{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.source-btn{background:none;border:none;color:var(--text-3);font-family:var(--font);font-size:12px;font-weight:500;padding:5px 14px;border-radius:6px;cursor:pointer;transition:all var(--transition)}
+.source-btn:hover{color:var(--text-1)}
+.source-btn.active{background:var(--bg-4);color:var(--text-0)}
+.source-filters{border-color:rgba(255,255,255,.12)}
+.overlay-source-tabs{display:flex;gap:6px;padding:10px 14px 0;border-top:1px solid var(--border);background:var(--bg-2)}
+.overlay-source-tab{border:1px solid var(--border);background:var(--bg-1);color:var(--text-3);font-family:var(--font);font-size:12px;font-weight:600;border-radius:999px;padding:7px 12px;cursor:pointer}
+.overlay-source-tab:hover{color:var(--text-1);border-color:var(--accent)}
+.overlay-source-tab.active{background:var(--accent);border-color:var(--accent);color:white}
+
+/* Lineup page */
+.lineup-page { padding: 30px; max-width: 1180px; margin: 0 auto; }
+.page-hero { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:22px; }
+.page-hero h1 { font-size:34px; margin:0 0 6px; }
+.page-hero p { color:var(--text-2); margin:0; }
+.lineup-list { display:flex; flex-direction:column; gap:12px; }
+.lineup-card { display:grid; grid-template-columns:48px 70px 1fr auto; gap:16px; align-items:center; padding:12px; border:1px solid var(--border); background:var(--bg-card); border-radius:18px; }
+.lineup-rank { width:36px; height:36px; border-radius:12px; display:flex; align-items:center; justify-content:center; background:rgba(108,92,231,.16); color:var(--accent-light); font-weight:800; }
+.lineup-poster { width:70px; height:104px; border-radius:12px; overflow:hidden; background:var(--bg-2); }
+.lineup-poster img { width:100%; height:100%; object-fit:cover; display:block; }
+.lineup-info h3 { font-size:18px; margin:0 0 6px; }
+.lineup-meta { color:var(--text-2); font-size:13px; margin-bottom:8px; }
+.lineup-status { display:inline-flex; padding:5px 10px; border-radius:999px; background:rgba(255,255,255,.05); color:var(--text-1); text-transform:capitalize; font-size:12px; }
+.lineup-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+.lineup-actions .btn-ghost[disabled] { opacity:.35; pointer-events:none; }
+.lineup-empty { margin-top:30px; }
+@media (max-width: 760px) { .lineup-card { grid-template-columns:34px 58px 1fr; } .lineup-actions { grid-column: 1 / -1; justify-content:flex-start; } .lineup-poster { width:58px; height:86px; } }
+.season-lineup-btn { border:1px solid rgba(162,155,254,.35); background:rgba(108,92,231,.12); color:var(--accent-light); border-radius:10px; padding:6px 10px; cursor:pointer; font-weight:700; }
+.season-lineup-btn:hover { background:rgba(108,92,231,.22); }
+
+/* v8 Lineup drag-first UX */
+.lineup-card {
+  grid-template-columns: 34px 44px 74px minmax(0, 1fr) 42px;
+  cursor: pointer;
+  position: relative;
+  transition: transform .16s ease, border-color .16s ease, background .16s ease, opacity .16s ease;
+}
+.lineup-card:hover { border-color: rgba(162,155,254,.45); background: rgba(255,255,255,.045); }
+.lineup-card.dragging { opacity: .55; transform: scale(.99); border-color: var(--accent-light); }
+.lineup-drag-handle {
+  width: 34px;
+  height: 82px;
+  border: 1px solid rgba(162,155,254,.24);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 11px 13px, rgba(255,255,255,.34) 1.6px, transparent 2px) 0 0 / 11px 12px,
+    linear-gradient(180deg, rgba(108,92,231,.18), rgba(255,255,255,.035));
+  color: var(--text-2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  cursor: grab;
+}
+.lineup-drag-handle:active { cursor: grabbing; }
+.lineup-drag-handle span { width: 16px; height: 2px; border-radius: 999px; background: currentColor; opacity: .75; }
+.lineup-rank { width: 38px; height: 38px; }
+.lineup-info { min-width: 0; }
+.lineup-info h3 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 8px; }
+.lineup-chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom: 8px; }
+.lineup-chips span, .lineup-soft {
+  display:inline-flex; align-items:center; min-height: 22px; padding: 3px 8px; border-radius: 999px;
+  background: rgba(255,255,255,.055); color: var(--text-2); font-size: 12px; font-weight: 700;
+}
+.lineup-subrow { display:flex; gap:7px; flex-wrap:wrap; align-items:center; }
+.icon-trash-btn {
+  width: 38px; height: 38px; border-radius: 13px; border: 1px solid rgba(225,112,85,.24);
+  background: rgba(225,112,85,.08); color: var(--dropped, #e17055); display:flex; align-items:center; justify-content:center;
+  cursor:pointer;
+}
+.icon-trash-btn svg { width: 17px; height: 17px; fill: currentColor; }
+.icon-trash-btn:hover { background: rgba(225,112,85,.18); }
+.detail-icon-btn { width: 44px; height: 44px; padding: 0; display:inline-flex; align-items:center; justify-content:center; border-radius: 14px; font-size: 18px; }
+.detail-actions .detail-icon-btn, .detail-hero-actions .detail-icon-btn { flex: 0 0 auto; }
+.season-lineup-btn, .season-diary-btn, .season-done-btn { min-width: 34px; }
+@media (max-width: 760px) {
+  .lineup-card { grid-template-columns: 30px 34px 58px 1fr 36px; gap: 10px; }
+  .lineup-drag-handle { width:30px; height:70px; }
+  .icon-trash-btn { width:34px; height:34px; }
+}
+
+/* Universal minimalist icon system */
+.logo-mark { background: transparent; box-shadow: none; border-radius: 0; }
+.logo-mark img { width: 32px; height: 32px; display: block; }
+.sidebar-search .search-icon img { width: 16px; height: 16px; display: block; opacity: .65; }
+.nav-icon { width: 22px; height: 22px; display:inline-flex; align-items:center; justify-content:center; flex:0 0 22px; }
+.nav-icon img { width: 17px; height: 17px; display:block; opacity:.82; }
+.nav-item.active .nav-icon img, .nav-item:hover .nav-icon img { opacity: 1; }
+.detail-icon-btn img, .season-lineup-btn img, .season-diary-btn img, .season-rw-btn img, .icon-trash-btn img, .icon-only-sm img, .quicklink-icon-btn img {
+  width: 18px; height: 18px; display:block; pointer-events:none;
+}
+.detail-icon-btn { gap:0; }
+.season-btn-col button { display:inline-flex; align-items:center; justify-content:center; gap:5px; }
+.season-lineup-btn img, .season-diary-btn img, .season-rw-btn img { width:15px; height:15px; }
+.icon-trash-btn img { width:18px; height:18px; }
+.icon-trash-btn svg { display:none; }
+.icon-only-sm { width:30px; height:30px; padding:0 !important; display:inline-flex; align-items:center; justify-content:center; border-radius:10px; }
+.icon-only-sm img { width:15px; height:15px; }
+.icon-only-sm.trash { color: var(--dropped); border-color: rgba(225,112,85,.24); background: rgba(225,112,85,.08); }
+.quicklink-icon-btn img { width:14px; height:14px; }
+
+/* v10 UX refinements: consistent icon buttons, cleaner Lineup, edit modal hierarchy */
+.icon-btn,
+.nav-item,
+.detail-icon-btn,
+.season-lineup-btn,
+.season-diary-btn,
+.season-rw-btn,
+.quicklink-icon-btn,
+.icon-only-sm {
+  box-shadow: none !important;
+}
+.detail-icon-btn,
+.season-lineup-btn,
+.season-diary-btn,
+.season-rw-btn,
+.quicklink-icon-btn,
+.icon-only-sm {
+  background: var(--bg-3) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text-1) !important;
+}
+.detail-icon-btn:hover,
+.season-lineup-btn:hover,
+.season-diary-btn:hover,
+.season-rw-btn:hover,
+.quicklink-icon-btn:hover,
+.icon-only-sm:hover {
+  background: var(--bg-4) !important;
+  border-color: rgba(162,155,254,.38) !important;
+  color: var(--text-0) !important;
+  transform: none !important;
+}
+.logo-mark img,
+.nav-icon img,
+.detail-icon-btn img,
+.season-lineup-btn img,
+.season-diary-btn img,
+.season-rw-btn img,
+.icon-trash-btn img,
+.quicklink-icon-btn img { opacity:.9; }
+
+.lineup-card {
+  grid-template-columns: 20px 38px 74px minmax(0, 1fr) 34px !important;
+  gap: 16px !important;
+  padding: 14px 18px !important;
+}
+.lineup-card:hover .lineup-drag-handle { opacity: 1; }
+.lineup-drag-handle {
+  width: 18px !important;
+  height: 44px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  display: grid !important;
+  grid-template-columns: repeat(2, 4px);
+  grid-auto-rows: 4px;
+  gap: 5px 4px !important;
+  place-content: center;
+  padding: 0 !important;
+  color: var(--text-3) !important;
+  opacity: .42;
+}
+.lineup-drag-handle span {
+  width: 4px !important;
+  height: 4px !important;
+  border-radius: 50% !important;
+  background: currentColor !important;
+  opacity: 1 !important;
+}
+.lineup-drag-handle:hover { color: var(--accent-light) !important; opacity: 1; }
+.lineup-rank { width: 36px !important; height: 36px !important; border-radius: 12px !important; }
+.lineup-meta-line { display:flex; align-items:center; gap:8px; color:var(--text-2); font-size:13px; line-height:1.35; flex-wrap:wrap; margin: 3px 0 7px; }
+.lineup-source-pill { display:inline-flex; align-items:center; min-height:22px; padding:3px 8px; border-radius:999px; background:rgba(255,255,255,.055); color:var(--text-1); font-size:12px; font-weight:800; }
+.lineup-dot { color:var(--text-3); margin:0 2px; }
+.lineup-subrow { gap:10px !important; }
+.lineup-plain-extra { color:var(--text-2); font-size:12px; font-weight:700; }
+.lineup-chips, .lineup-soft { display:none !important; }
+.lineup-status { padding:3px 8px !important; min-height:22px; font-size:12px !important; font-weight:700; }
+.icon-trash-btn {
+  width: 34px !important;
+  height: 34px !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--text-3) !important;
+  border-radius: 11px !important;
+  box-shadow: none !important;
+}
+.icon-trash-btn:hover { background: rgba(225,112,85,.12) !important; color: var(--dropped, #e17055) !important; }
+.icon-trash-btn img { width: 17px !important; height:17px !important; }
+@media (max-width:760px) {
+  .lineup-card { grid-template-columns: 18px 32px 58px 1fr 30px !important; gap: 9px !important; padding:10px !important; }
+  .lineup-drag-handle { width:16px !important; height:38px !important; }
+}
+
+.edit-date-input-row.date-with-today { position: relative; gap: 0 !important; }
+.edit-date-input-row.date-with-today .edit-date-input { padding-right: 70px !important; }
+.btn-today.inline {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent !important;
+  border: 0 !important;
+  padding: 4px 6px !important;
+  color: var(--accent-light) !important;
+  font-size: 11px !important;
+  box-shadow:none !important;
+}
+.btn-today.inline:hover { background: rgba(162,155,254,.12) !important; border-radius: 6px; color: var(--text-0) !important; }
+.edit-rewatch-row { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px; border:1px solid var(--border); border-radius:12px; background:var(--bg-1); }
+.edit-rewatch-row .btn-ghost { margin-left:0 !important; min-width:120px; }
+.edit-actions { padding-top:18px !important; }
+.edit-danger-zone { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--border); }
+.btn-delete {
+  width:auto !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--dropped) !important;
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  font-weight:800;
+}
+.btn-delete:hover { background: transparent !important; text-decoration: underline; }
+.btn-delete img { width:15px; height:15px; opacity:.9; }
+.edit-danger-zone .edit-field-hint { margin-top:8px !important; }
+
+/* v11 brand mark + theme-consistent icon/button polish */
+.sidebar-logo { gap: 10px; }
+.logo-mark { width: 32px !important; height: 32px !important; background: transparent !important; box-shadow: none !important; border-radius: 9px !important; }
+.logo-mark img { width: 32px !important; height: 32px !important; }
+.logo-text { display:inline-flex; align-items:baseline; letter-spacing:-.45px; }
+.brand-watch { color:var(--text-color); font-weight:850; }
+.brand-tracker { color:var(--accent-color); font-weight:600; }
+.icon-btn,
+.detail-icon-btn,
+.season-lineup-btn,
+.season-diary-btn,
+.season-rw-btn,
+.quicklink-icon-btn,
+.icon-only-sm,
+.icon-trash-btn {
+  box-shadow: none !important;
+  filter: none !important;
+}
+.detail-icon-btn,
+.season-lineup-btn,
+.season-diary-btn,
+.season-rw-btn,
+.quicklink-icon-btn,
+.icon-only-sm {
+  background: var(--bg-2) !important;
+  border-color: var(--border) !important;
+  color: var(--text-1) !important;
+}
+.detail-icon-btn:hover,
+.season-lineup-btn:hover,
+.season-diary-btn:hover,
+.season-rw-btn:hover,
+.quicklink-icon-btn:hover,
+.icon-only-sm:hover {
+  background: var(--bg-3) !important;
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent) !important;
+  color: var(--text-0) !important;
+  transform: none !important;
+}
+.nav-item.active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-1)) !important;
+  color: var(--text-0) !important;
+}
+.nav-item.active .nav-icon img { opacity: 1; }
+.icon-trash-btn {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+.icon-trash-btn:hover {
+  background: rgba(225,112,85,.12) !important;
+  border-color: transparent !important;
+}
+
+
+/* v12 theme-consistent buttons */
+.brand-watch { color: var(--text-color) !important; }
+.brand-tracker { color: var(--accent-color) !important; }
+.icon-btn,
+.detail-icon-btn,
+.season-lineup-btn,
+.season-diary-btn,
+.season-rw-btn,
+.quicklink-icon-btn,
+.icon-only-sm {
+  background: var(--bg-2) !important;
+  border-color: var(--border) !important;
+  color: var(--text-1) !important;
+  box-shadow: none !important;
+  background-image: none !important;
+  filter: none !important;
+}
+.icon-btn:hover,
+.detail-icon-btn:hover,
+.season-lineup-btn:hover,
+.season-diary-btn:hover,
+.season-rw-btn:hover,
+.quicklink-icon-btn:hover,
+.icon-only-sm:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-2)) !important;
+  border-color: color-mix(in srgb, var(--accent) 52%, transparent) !important;
+  color: var(--text-0) !important;
+}
+.detail-icon-btn.active,
+.icon-only-sm.active,
+.season-lineup-btn.active,
+.season-diary-btn.active,
+.season-rw-btn.active {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-2)) !important;
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent) !important;
+}
+.list-source-btn.active,
+.list-type-btn.active,
+.overlay-source-tab.active,
+.theme-swatch.active {
+  background-image: none !important;
+  box-shadow: none !important;
+  border-color: var(--accent) !important;
+}
+.logo-mark img { border-radius: 9px; }
+
+
+/* Theme-aware inlined SVG icons */
+.themed-svg-icon { color: currentColor; display: inline-flex; align-items: center; justify-content: center; line-height: 0; flex: 0 0 auto; pointer-events: none; }
+.themed-svg-icon svg { width: 100%; height: 100%; display: block; stroke: currentColor; }
+.themed-svg-icon svg [stroke]:not([stroke="none"]) { stroke: currentColor; }
+.themed-svg-icon svg [fill]:not([fill="none"]) { fill: currentColor; }
+.sidebar-search .search-icon .themed-svg-icon { width: 16px; height: 16px; opacity: .65; }
+.nav-icon .themed-svg-icon { width: 17px; height: 17px; opacity: .82; }
+.nav-item.active .nav-icon .themed-svg-icon, .nav-item:hover .nav-icon .themed-svg-icon { opacity: 1; }
+.detail-icon-btn .themed-svg-icon, .icon-only-sm .themed-svg-icon { width: 18px; height: 18px; }
+.season-lineup-btn .themed-svg-icon, .season-diary-btn .themed-svg-icon, .season-rw-btn .themed-svg-icon { width: 15px; height: 15px; }
+.icon-trash-btn .themed-svg-icon { width: 17px; height: 17px; }
+.quicklink-icon-btn .themed-svg-icon { width: 14px; height: 14px; }
+.btn-delete .themed-svg-icon { width: 15px; height: 15px; opacity: .9; }
+
+/* v18 richer theme swatches: show each preset's full palette instead of a nearly-solid dark tile */
+.theme-grid {
+  gap: 10px;
+}
+.theme-swatch {
+  gap: 7px;
+  padding: 8px 6px 9px;
+}
+.swatch-preview.palette-preview {
+  position: relative;
+  width: 100%;
+  height: 46px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--sw-text) 18%, transparent);
+  background:
+    radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--sw-accent-l) 58%, transparent) 0 12px, transparent 13px),
+    linear-gradient(135deg, var(--sw-bg0) 0 34%, var(--sw-bg1) 34% 57%, var(--sw-bg2) 57% 78%, var(--sw-bg3) 78% 100%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sw-text) 7%, transparent);
+}
+.swatch-preview.palette-preview::before {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 8px;
+  background: linear-gradient(90deg, var(--sw-accent), var(--sw-accent-l));
+}
+.swatch-shell {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  width: 58%;
+  padding: 5px 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--sw-bg2) 78%, transparent);
+  box-shadow: 0 8px 18px color-mix(in srgb, #000 26%, transparent);
+}
+.swatch-row {
+  display: block;
+  height: 3px;
+  width: 72%;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sw-text) 68%, transparent);
+  opacity: .86;
+}
+.swatch-row + .swatch-row {
+  width: 44%;
+  margin-top: 4px;
+  opacity: .45;
+}
+.swatch-title {
+  width: 82%;
+}
+.swatch-pill {
+  display: block;
+  width: 24px;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: var(--sw-accent);
 }

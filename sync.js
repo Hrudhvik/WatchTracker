@@ -5,8 +5,23 @@
    to bypass CORS restrictions in Chrome MV3.
    ═══════════════════════════════════════════ */
 
-// Route fetch through background.js to bypass CORS
+// Route fetch through background.js to bypass CORS from extension pages.
+// When this file is running inside background.js itself, fetch directly to avoid
+// sending a message from the service worker back to the same service worker.
 async function bgFetch(url, options) {
+  const runningInBackgroundWorker = typeof ServiceWorkerGlobalScope !== 'undefined' && self instanceof ServiceWorkerGlobalScope;
+  if (runningInBackgroundWorker || !(typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage)) {
+    try {
+      const res = await fetch(url, options || {});
+      const contentType = res.headers.get('content-type') || '';
+      let body;
+      if (contentType.includes('json')) body = await res.json();
+      else body = await res.text();
+      return { ok: res.ok, status: res.status, body };
+    } catch (err) {
+      return { ok: false, status: 0, error: err.message || String(err) };
+    }
+  }
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({ type: 'fetch', url, options: options || {} }, response => {
       if (chrome.runtime.lastError) {
@@ -19,6 +34,40 @@ async function bgFetch(url, options) {
       }
       resolve(response);
     });
+  });
+}
+
+function decodeXmlEntities(str) {
+  return String(str || '')
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function xmlTagText(block, tag) {
+  const re = new RegExp(`<(?:[a-zA-Z0-9_]+:)?${tag}[^>]*>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?${tag}>`, 'i');
+  const m = String(block || '').match(re);
+  return m ? decodeXmlEntities(m[1]).trim() : '';
+}
+
+function parseLetterboxdRssFallback(xml) {
+  return [...String(xml || '').matchAll(/<item\b[\s\S]*?<\/item>/gi)].map(m => {
+    const block = m[0];
+    return {
+      title: xmlTagText(block, 'title'),
+      pubDate: xmlTagText(block, 'pubDate'),
+      description: xmlTagText(block, 'description'),
+      filmTitle: xmlTagText(block, 'filmTitle'),
+      filmYear: xmlTagText(block, 'filmYear'),
+      memberRating: xmlTagText(block, 'memberRating'),
+      movieId: xmlTagText(block, 'movieId'),
+      watchedDate: xmlTagText(block, 'watchedDate'),
+      rewatch: xmlTagText(block, 'rewatch'),
+      guid: xmlTagText(block, 'guid') || xmlTagText(block, 'link'),
+    };
   });
 }
 
@@ -75,57 +124,28 @@ const SyncEngine = {
       throw new Error('Invalid RSS response. Check that username "' + username + '" exists.');
     }
 
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xml, 'text/xml');
-    const parseError = doc.querySelector('parsererror');
-    if (parseError) throw new Error('Failed to parse Letterboxd RSS XML.');
-
-    const items = doc.querySelectorAll('item');
     const entries = [];
-
-    items.forEach(item => {
-      let title = item.querySelector('title')?.textContent || '';
-      const pubDate = item.querySelector('pubDate')?.textContent || '';
-      const desc = item.querySelector('description')?.textContent || '';
-
-      const lTitleEl = item.getElementsByTagNameNS('*', 'filmTitle')[0];
-      const lYearEl = item.getElementsByTagNameNS('*', 'filmYear')[0];
-      const lRatingEl = item.getElementsByTagNameNS('*', 'memberRating')[0];
-      const tmdbIdEl = item.getElementsByTagNameNS('*', 'movieId')[0];
-      
-      let cleanTitle = lTitleEl ? lTitleEl.textContent : '';
-      let year = lYearEl ? parseInt(lYearEl.textContent) : null;
-      let rating = lRatingEl ? parseFloat(lRatingEl.textContent) * 2 : null;
-      let tmdbId = tmdbIdEl ? parseInt(tmdbIdEl.textContent) : null;
-
-      // Fallback parsing if namespaces are missing
+    const pushParsedItem = ({ title = '', pubDate = '', desc = '', cleanTitle = '', year = null, rating = null, tmdbId = null, watchDate = '', isRewatch = false, guid = '' }) => {
       if (!cleanTitle) {
-        const yearMatch = title.match(/,\s*(\d{4})/);
-        year = yearMatch ? parseInt(yearMatch[1]) : null;
-        cleanTitle = title.replace(/,\s*\d{4}.*$/, '').trim();
+        const yearMatch = String(title || '').match(/,\s*(\d{4})/);
+        year = yearMatch ? parseInt(yearMatch[1]) : year;
+        cleanTitle = String(title || '').replace(/,\s*\d{4}.*$/, '').trim();
       }
-      
-      if (rating === null) {
-        const starMatch = desc.match(/★/g);
+      if (rating === null || Number.isNaN(rating)) {
+        const starMatch = String(desc || '').match(/★/g);
         if (starMatch) {
           rating = starMatch.length * 2;
-          if (desc.includes('½')) rating += 1;
+          if (String(desc || '').includes('½')) rating += 1;
         }
       }
-
-      // Watch date
-      let watchDate = '';
-      const dateEl = item.querySelector('watchedDate') || item.getElementsByTagNameNS('*', 'watchedDate')[0];
-      if (dateEl) watchDate = dateEl.textContent;
-      else if (pubDate) watchDate = new Date(pubDate).toISOString().slice(0, 10);
-
-      // Rewatch
-      const rewatchEl = item.querySelector('rewatch') || item.getElementsByTagNameNS('*', 'rewatch')[0];
-      const isRewatch = rewatchEl ? rewatchEl.textContent === 'Yes' : false;
-
+      if (!watchDate && pubDate) {
+        const d = new Date(pubDate);
+        if (!Number.isNaN(d.getTime())) watchDate = d.toISOString().slice(0, 10);
+      }
       if (cleanTitle) {
         entries.push({
           source: 'letterboxd',
+          syncSource: 'letterboxd-rss',
           title: cleanTitle,
           year,
           rating,
@@ -133,10 +153,56 @@ const SyncEngine = {
           isRewatch,
           type: 'movie',
           watchStatus: 'completed',
-          tmdbId
+          tmdbId: Number.isFinite(Number(tmdbId)) ? Number(tmdbId) : null,
+          letterboxdGuid: guid || '',
         });
       }
-    });
+    };
+
+    if (typeof DOMParser !== 'undefined') {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xml, 'text/xml');
+      const parseError = doc.querySelector('parsererror');
+      if (parseError) throw new Error('Failed to parse Letterboxd RSS XML.');
+
+      doc.querySelectorAll('item').forEach(item => {
+        const title = item.querySelector('title')?.textContent || '';
+        const pubDate = item.querySelector('pubDate')?.textContent || '';
+        const desc = item.querySelector('description')?.textContent || '';
+        const lTitleEl = item.getElementsByTagNameNS('*', 'filmTitle')[0];
+        const lYearEl = item.getElementsByTagNameNS('*', 'filmYear')[0];
+        const lRatingEl = item.getElementsByTagNameNS('*', 'memberRating')[0];
+        const tmdbIdEl = item.getElementsByTagNameNS('*', 'movieId')[0];
+        const dateEl = item.querySelector('watchedDate') || item.getElementsByTagNameNS('*', 'watchedDate')[0];
+        const rewatchEl = item.querySelector('rewatch') || item.getElementsByTagNameNS('*', 'rewatch')[0];
+        const guidEl = item.querySelector('guid') || item.querySelector('link');
+        pushParsedItem({
+          title, pubDate, desc,
+          cleanTitle: lTitleEl ? lTitleEl.textContent : '',
+          year: lYearEl ? parseInt(lYearEl.textContent) : null,
+          rating: lRatingEl ? parseFloat(lRatingEl.textContent) * 2 : null,
+          tmdbId: tmdbIdEl ? parseInt(tmdbIdEl.textContent) : null,
+          watchDate: dateEl ? dateEl.textContent : '',
+          isRewatch: rewatchEl ? rewatchEl.textContent === 'Yes' : false,
+          guid: guidEl ? guidEl.textContent : '',
+        });
+      });
+    } else {
+      parseLetterboxdRssFallback(xml).forEach(item => {
+        pushParsedItem({
+          title: item.title,
+          pubDate: item.pubDate,
+          desc: item.description,
+          cleanTitle: item.filmTitle,
+          year: item.filmYear ? parseInt(item.filmYear) : null,
+          rating: item.memberRating ? parseFloat(item.memberRating) * 2 : null,
+          tmdbId: item.movieId ? parseInt(item.movieId) : null,
+          watchDate: item.watchedDate,
+          isRewatch: item.rewatch === 'Yes',
+          guid: item.guid,
+        });
+      });
+    }
 
     this._config.lastSync.letterboxd = new Date().toISOString();
     this.saveConfig();

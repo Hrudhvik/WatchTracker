@@ -1,19 +1,23 @@
 /* Unified Watchlist — Poster Grid | Compact | Table */
 
 const ListUI = {
-  _statusFilter: 'all', _typeFilter: 'all', _sortBy: 'dateAdded', _viewMode: 'poster', _searchQuery: '',
+  _statusFilter: 'all', _sourceFilter: 'all', _typeFilter: 'all', _sortBy: 'dateAdded', _viewMode: 'poster', _searchQuery: '',
 
   init() {
     // Restore saved filter state
     chrome.storage.local.get(['_listPrefs'], (d) => {
       const p = d._listPrefs || {};
       if (p.statusFilter) this._statusFilter = p.statusFilter;
+      if (p.sourceFilter) this._sourceFilter = p.sourceFilter;
       if (p.typeFilter) this._typeFilter = p.typeFilter;
       if (p.sortBy) this._sortBy = p.sortBy;
       if (p.viewMode) this._viewMode = p.viewMode;
       // Apply restored state to UI
       document.querySelectorAll('.list-tab').forEach(t => {
         t.classList.toggle('active', t.dataset.status === this._statusFilter);
+      });
+      document.querySelectorAll('.source-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.source === this._sourceFilter);
       });
       document.querySelectorAll('.type-btn').forEach(b => {
         b.classList.toggle('active', b.dataset.type === this._typeFilter);
@@ -32,6 +36,15 @@ const ListUI = {
         document.querySelectorAll('.list-tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         this._statusFilter = tab.dataset.status;
+        this._savePrefs();
+        this.render();
+      });
+    });
+    document.querySelectorAll('.source-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this._sourceFilter = btn.dataset.source || 'all';
         this._savePrefs();
         this.render();
       });
@@ -81,6 +94,7 @@ const ListUI = {
   _savePrefs() {
     chrome.storage.local.set({ _listPrefs: {
       statusFilter: this._statusFilter,
+      sourceFilter: this._sourceFilter,
       typeFilter: this._typeFilter,
       sortBy: this._sortBy,
       viewMode: this._viewMode,
@@ -90,6 +104,8 @@ const ListUI = {
   _getItems() {
     let items = Store.getAll();
     if (this._statusFilter !== 'all') items = items.filter(i => i.watchStatus === this._statusFilter);
+    if (this._sourceFilter === 'anime') items = items.filter(i => i.sourceTag === 'anime' || i.syncSource === 'mal-search' || i.malId || (Array.isArray(i.externalIds) && i.externalIds.some(x => x.provider === 'mal')));
+    else if (this._sourceFilter === 'tmdb') items = items.filter(i => !(i.sourceTag === 'anime' || i.syncSource === 'mal-search' || i.malId || (Array.isArray(i.externalIds) && i.externalIds.some(x => x.provider === 'mal'))));
     if (this._typeFilter !== 'all') items = items.filter(i => i.mediaType === this._typeFilter);
     if (this._searchQuery) items = items.filter(i => (i.title || '').toLowerCase().includes(this._searchQuery));
     switch (this._sortBy) {

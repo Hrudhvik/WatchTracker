@@ -20,7 +20,7 @@ const DEFAULT_QUICK_LINKS = [
 const ACTIVE_DEFAULT_QUICK_LINK_IDS = new Set(DEFAULT_QUICK_LINKS.map(link => link.id));
 
 const Store = {
-  _data: { apiKey: '', movies: [], tvshows: [], diary: [], activity: [], theme: null, popupPrefs: null, letterboxdWidgetEnabled: true, quickLinks: [], quickLinkDefaultsSeeded: false },
+  _data: { apiKey: '', movies: [], tvshows: [], diary: [], activity: [], lineup: [], theme: null, popupPrefs: null, letterboxdWidgetEnabled: true, quickLinks: [], quickLinkDefaultsSeeded: false },
   _nextId: 1,
 
   _newMediaId() {
@@ -123,13 +123,15 @@ const Store = {
     // Remove legacy OMDb settings/cache so the extension never keeps or uses OMDb credentials.
     try { chrome.storage.local.remove(['omdbKey', 'omdbCache']); } catch (_) {}
     return new Promise(resolve => {
-      chrome.storage.local.get(['apiKey', 'movies', 'tvshows', 'diary', 'activity', 'theme', 'popupPrefs', 'letterboxdWidgetEnabled', 'quickLinks', 'quickLinkDefaultsSeeded'], d => {
+      chrome.storage.local.get(['apiKey', 'movies', 'tvshows', 'diary', 'activity', 'lineup', 'theme', 'popupPrefs', 'letterboxdWidgetEnabled', 'quickLinks', 'quickLinkDefaultsSeeded'], d => {
         this._data.apiKey = d.apiKey || '';
         this._data.movies = d.movies || [];
         this._data.tvshows = d.tvshows || [];
         this._data.diary = d.diary || [];
         this._data.activity = d.activity || [];
+        this._data.lineup = Array.isArray(d.lineup) ? d.lineup : [];
         this._data.theme = d.theme || null;
+        try { localStorage.setItem('watchtracker-theme-cache-v1', JSON.stringify(this._data.theme || { preset: 'midnight' })); } catch (_) {}
         this._data.popupPrefs = d.popupPrefs || null;
         this._data.letterboxdWidgetEnabled = d.letterboxdWidgetEnabled !== false;
         this._data.quickLinkDefaultsSeeded = d.quickLinkDefaultsSeeded === true;
@@ -147,6 +149,8 @@ const Store = {
         }
         this._data.quickLinks = quickLinks;
         this._assignIds();
+        if (this.dedupeDiary) this.dedupeDiary();
+        if (this.cleanupLineup) this.cleanupLineup();
         resolve(this._data);
       });
     });
@@ -179,11 +183,14 @@ const Store = {
     if (idx === -1) return;
     Object.assign(this._data.movies[idx], updates, { dateUpdated: new Date().toISOString() });
     this._saveMovies();
+    if (this.cleanupLineup) this.cleanupLineup();
   },
 
   removeMovie(tmdbId) {
+    const removed = this._data.movies.find(m => m.tmdbId === tmdbId);
     this._data.movies = this._data.movies.filter(m => m.tmdbId !== tmdbId);
     this._saveMovies();
+    if (removed) this.removeFromLineupByMedia(removed);
   },
 
   hasMovie(tmdbId) {
@@ -208,9 +215,9 @@ const Store = {
 
   removeById(id) {
     const mi = this._data.movies.findIndex(m => m._id === id);
-    if (mi !== -1) { this._data.movies.splice(mi, 1); this._saveMovies(); return true; }
+    if (mi !== -1) { const removed = this._data.movies.splice(mi, 1)[0]; this._saveMovies(); this.removeFromLineupByMedia(removed); return true; }
     const ti = this._data.tvshows.findIndex(t => t._id === id);
-    if (ti !== -1) { this._data.tvshows.splice(ti, 1); this._saveTvShows(); return true; }
+    if (ti !== -1) { const removed = this._data.tvshows.splice(ti, 1)[0]; this._saveTvShows(); this.removeFromLineupByMedia(removed); return true; }
     return false;
   },
 
@@ -247,6 +254,7 @@ const Store = {
     if (idx === -1) return;
     Object.assign(this._data.tvshows[idx], updates, { dateUpdated: new Date().toISOString() });
     this._saveTvShows();
+    if (this.cleanupLineup) this.cleanupLineup();
   },
 
   // Update by MAL ID — needed because multiple anime can share a TMDB ID
@@ -255,17 +263,22 @@ const Store = {
     if (idx === -1) return;
     Object.assign(this._data.tvshows[idx], updates, { dateUpdated: new Date().toISOString() });
     this._saveTvShows();
+    if (this.cleanupLineup) this.cleanupLineup();
   },
 
   removeTvShow(tmdbId) {
+    const removed = this._data.tvshows.find(t => t.tmdbId === tmdbId);
     this._data.tvshows = this._data.tvshows.filter(t => t.tmdbId !== tmdbId);
     this._saveTvShows();
+    if (removed) this.removeFromLineupByMedia(removed);
   },
 
   // Remove by MAL ID — precise removal of a single anime entry
   removeTvShowByMalId(malId) {
+    const removed = this._data.tvshows.find(t => t.malId === malId);
     this._data.tvshows = this._data.tvshows.filter(t => t.malId !== malId);
     this._saveTvShows();
+    if (removed) this.removeFromLineupByMedia(removed);
   },
 
   hasTvShow(tmdbId) {
@@ -291,6 +304,66 @@ const Store = {
   // ─── Diary (completion log) ───
   getDiary() { return this._data.diary; },
 
+  _normalizeDiaryTitle(title) {
+    return String(title || '')
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/&/g, 'and')
+      .replace(/\b(the|a|an)\b/g, '')
+      .replace(/[^a-z0-9]+/g, '')
+      .trim();
+  },
+
+  _diaryIdentityKey(entry) {
+    const mediaId = entry.mediaId || entry.libraryMediaId || '';
+    if (mediaId) return `media:${mediaId}`;
+    if (entry.malId) return `mal:${Number(entry.malId)}`;
+    if (entry.tmdbId != null && Number(entry.tmdbId) > 0) return `tmdb:${entry.type || 'media'}:${Number(entry.tmdbId)}`;
+    const title = this._normalizeDiaryTitle(entry.title);
+    return title ? `title:${entry.type || 'media'}:${title}` : 'unknown';
+  },
+
+  makeDiaryCanonicalKey(entry) {
+    const date = entry.date || '';
+    const action = entry.action || 'watched';
+    const season = entry.season ? `:s${entry.season}` : '';
+    return `${date}:${action}:${this._diaryIdentityKey(entry)}${season}`;
+  },
+
+  _enrichDiaryEntryIdentity(entry) {
+    const all = this.getAll ? this.getAll() : [...this._data.movies, ...this._data.tvshows];
+    let match = null;
+    if (entry.mediaId) match = all.find(i => i.mediaId === entry.mediaId);
+    if (!match && entry.malId) match = all.find(i => Number(i.malId) === Number(entry.malId));
+    if (!match && entry.tmdbId != null) match = all.find(i => Number(i.tmdbId) === Number(entry.tmdbId) && (!entry.type || i.mediaType === entry.type));
+    if (!match && entry.title) {
+      const title = this._normalizeDiaryTitle(entry.title);
+      match = all.find(i => this._normalizeDiaryTitle(i.title) === title && (!entry.type || i.mediaType === entry.type));
+    }
+    if (match) {
+      entry.mediaId = entry.mediaId || match.mediaId || null;
+      entry.malId = entry.malId || match.malId || null;
+      entry.tmdbId = entry.tmdbId != null ? entry.tmdbId : match.tmdbId;
+      entry.type = entry.type || match.mediaType || (match.runtime ? 'movie' : 'tv');
+      entry.posterPath = entry.posterPath || match.posterPath || null;
+      entry.title = entry.title || match.title || '';
+    }
+    return entry;
+  },
+
+  _isSameDiaryWatch(a, b) {
+    if ((a.date || '') !== (b.date || '')) return false;
+    if ((a.action || 'watched') !== (b.action || 'watched')) return false;
+    if ((a.season || '') !== (b.season || '')) return false;
+    if (a.mediaId && b.mediaId && a.mediaId === b.mediaId) return true;
+    if (a.malId && b.malId && Number(a.malId) === Number(b.malId)) return true;
+    if (a.tmdbId != null && b.tmdbId != null && Number(a.tmdbId) > 0 && Number(a.tmdbId) === Number(b.tmdbId) && (!a.type || !b.type || a.type === b.type)) return true;
+    const at = this._normalizeDiaryTitle(a.title);
+    const bt = this._normalizeDiaryTitle(b.title);
+    return !!(at && bt && at === bt && (!a.type || !b.type || a.type === b.type));
+  },
+
   makeDiarySourceEventKey(entry) {
     if (entry.sourceEventKey) return entry.sourceEventKey;
     const source = entry.syncSource || entry.source || 'manual';
@@ -302,44 +375,225 @@ const Store = {
   },
 
   addDiaryEntry(entry) {
-    // entry: { mediaId, tmdbId, title, type, posterPath, date, action, notes, rating, mood, episodes, timestamp, sourceEventKey }
+    // entry: { mediaId, tmdbId, malId, title, type, posterPath, date, action, notes, rating, mood, episodes, timestamp, sourceEventKey }
+    this._enrichDiaryEntryIdentity(entry);
     if (!entry.timestamp) entry.timestamp = new Date().toISOString();
     const key = this.makeDiarySourceEventKey(entry);
     if (key) entry.sourceEventKey = key;
-    const existingIdx = key ? this._data.diary.findIndex(d => d.sourceEventKey === key) : -1;
+    entry.canonicalDiaryKey = this.makeDiaryCanonicalKey(entry);
+
+    const existingIdx = this._data.diary.findIndex(d => {
+      this._enrichDiaryEntryIdentity(d);
+      if (key && d.sourceEventKey === key) return true;
+      if (d.canonicalDiaryKey && d.canonicalDiaryKey === entry.canonicalDiaryKey) return true;
+      return this._isSameDiaryWatch(d, entry);
+    });
+
     if (existingIdx !== -1) {
-      this._data.diary[existingIdx] = { ...this._data.diary[existingIdx], ...entry, timestamp: this._data.diary[existingIdx].timestamp || entry.timestamp };
+      const existing = this._data.diary[existingIdx];
+      this._data.diary[existingIdx] = {
+        ...existing,
+        ...entry,
+        notes: existing.notes || entry.notes || '',
+        mood: existing.mood || entry.mood || null,
+        rating: existing.rating || entry.rating || null,
+        timestamp: existing.timestamp || entry.timestamp,
+        sourceEventKey: existing.sourceEventKey || entry.sourceEventKey,
+        canonicalDiaryKey: entry.canonicalDiaryKey,
+      };
       chrome.storage.local.set({ diary: this._data.diary });
       return false;
     }
-    // Defensive import/sync dedupe for older entries without sourceEventKey. Manual diary can still log multiple watches.
-    if (entry.syncSource || entry.source) {
-      const titleLower = (entry.title || '').toLowerCase();
-      const oldIdx = this._data.diary.findIndex(d =>
-        d.date === entry.date && d.type === entry.type && (d.action || 'watched') === (entry.action || 'watched') &&
-        (d.tmdbId === entry.tmdbId || (entry.malId && d.malId === entry.malId) || ((d.title || '').toLowerCase() === titleLower && titleLower))
-      );
-      if (oldIdx !== -1) {
-        this._data.diary[oldIdx] = { ...this._data.diary[oldIdx], ...entry, timestamp: this._data.diary[oldIdx].timestamp || entry.timestamp };
-        chrome.storage.local.set({ diary: this._data.diary });
-        return false;
-      }
-    }
+
     this._data.diary.unshift(entry);
     chrome.storage.local.set({ diary: this._data.diary });
     return true;
   },
 
+  dedupeDiary() {
+    const cleaned = [];
+    let removed = 0;
+    for (const raw of this._data.diary || []) {
+      const entry = this._enrichDiaryEntryIdentity({ ...raw });
+      entry.canonicalDiaryKey = this.makeDiaryCanonicalKey(entry);
+      const existing = cleaned.find(d =>
+        (d.canonicalDiaryKey && d.canonicalDiaryKey === entry.canonicalDiaryKey) || this._isSameDiaryWatch(d, entry)
+      );
+      if (existing) {
+        existing.notes = existing.notes || entry.notes || '';
+        existing.mood = existing.mood || entry.mood || null;
+        existing.rating = existing.rating || entry.rating || null;
+        existing.malId = existing.malId || entry.malId || null;
+        existing.mediaId = existing.mediaId || entry.mediaId || null;
+        existing.posterPath = existing.posterPath || entry.posterPath || null;
+        existing.sourceEventKey = existing.sourceEventKey || entry.sourceEventKey;
+        removed++;
+      } else {
+        cleaned.push(entry);
+      }
+    }
+    if (removed > 0 || cleaned.some((e, i) => e !== this._data.diary[i])) {
+      this._data.diary = cleaned;
+      chrome.storage.local.set({ diary: this._data.diary });
+    }
+    return { removed, total: cleaned.length };
+  },
+
   removeDiaryEntry(tmdbId, timestamp) {
-    if (timestamp) { this._data.diary = this._data.diary.filter(d => !(d.tmdbId === tmdbId && d.timestamp === timestamp)); }
+    if (timestamp) { this._data.diary = this._data.diary.filter(d => d.timestamp !== timestamp); }
     else { const i = this._data.diary.findIndex(d => d.tmdbId === tmdbId); if (i !== -1) this._data.diary.splice(i, 1); }
     chrome.storage.local.set({ diary: this._data.diary });
   },
-  updateDiaryEntry(ts, u) { const i = this._data.diary.findIndex(d => d.timestamp === ts); if (i >= 0) { Object.assign(this._data.diary[i], u); chrome.storage.local.set({ diary: this._data.diary }); } },
+  updateDiaryEntry(ts, u) { const i = this._data.diary.findIndex(d => d.timestamp === ts); if (i >= 0) { Object.assign(this._data.diary[i], u); this._enrichDiaryEntryIdentity(this._data.diary[i]); this._data.diary[i].canonicalDiaryKey = this.makeDiaryCanonicalKey(this._data.diary[i]); chrome.storage.local.set({ diary: this._data.diary }); } },
   getDiaryEntry(ts) { return this._data.diary.find(d => d.timestamp === ts); },
   getUserRating(id, t) { const e = this._data.diary.filter(d => d.tmdbId === id && d.type === t && d.rating); return e.length ? e[0].rating : null; },
   getSeasonRatings(id) { const m = {}; this._data.diary.filter(d => d.tmdbId === id && d.type === 'tv' && d.rating && d.season).forEach(e => { if (!m[e.season]) m[e.season] = e.rating; }); return m; },
   getAvgUserRating(id, t) { const e = this._data.diary.filter(d => d.tmdbId === id && d.type === t && d.rating); return e.length ? e.reduce((s, d) => s + d.rating, 0) / e.length : null; },
+
+
+  // ─── Lineup / Watch Next Queue ───
+  getLineup() {
+    return Array.isArray(this._data.lineup) ? this._data.lineup : [];
+  },
+
+  _saveLineup() {
+    chrome.storage.local.set({ lineup: this._data.lineup || [] });
+  },
+
+  _lineupKeyFor(item, opts = {}) {
+    const targetType = opts.targetType || (item.mediaType === 'movie' || item.type === 'movie' ? 'movie' : 'show');
+    const seasonNumber = targetType === 'season' ? Number(opts.seasonNumber || 1) : '';
+    if (item.mediaId) return `${targetType}:${item.mediaId}:${seasonNumber}`;
+    if (item.malId) return `${targetType}:mal:${item.malId}:${seasonNumber}`;
+    return `${targetType}:tmdb:${item.tmdbId}:${seasonNumber}`;
+  },
+
+  isInLineup(item, opts = {}) {
+    const key = this._lineupKeyFor(item, opts);
+    return this.getLineup().some(x => x.key === key);
+  },
+
+  addToLineup(item, opts = {}) {
+    if (!item) return false;
+    if (!Array.isArray(this._data.lineup)) this._data.lineup = [];
+    const mediaType = item.mediaType || item.type || (item.runtime ? 'movie' : 'tv');
+    const targetType = opts.targetType || (mediaType === 'movie' ? 'movie' : 'show');
+    const seasonNumber = targetType === 'season' ? Number(opts.seasonNumber || 1) : null;
+    const key = this._lineupKeyFor({ ...item, mediaType }, { targetType, seasonNumber });
+    if (this._data.lineup.some(x => x.key === key)) return false;
+    const entry = {
+      id: 'lineup_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8),
+      key,
+      mediaId: item.mediaId || null,
+      tmdbId: item.tmdbId,
+      malId: item.malId || null,
+      source: item.sourceTag === 'anime' || item.mediaKind === 'anime' ? 'mal' : 'tmdb',
+      title: item.title,
+      type: mediaType === 'movie' ? 'movie' : (item.sourceTag === 'anime' ? 'anime' : 'tv'),
+      mediaType: mediaType === 'movie' ? 'movie' : 'tv',
+      targetType,
+      seasonNumber,
+      posterPath: item.posterPath || null,
+      addedAt: new Date().toISOString(),
+      order: this._data.lineup.length
+    };
+    this._data.lineup.push(entry);
+    this._saveLineup();
+    return true;
+  },
+
+  removeFromLineup(id) {
+    const before = this.getLineup().length;
+    this._data.lineup = this.getLineup().filter(x => x.id !== id && x.key !== id);
+    if (this._data.lineup.length !== before) { this._normalizeLineupOrder(); this._saveLineup(); return true; }
+    return false;
+  },
+
+  removeFromLineupByMedia(item) {
+    if (!item) return false;
+    const before = this.getLineup().length;
+    this._data.lineup = this.getLineup().filter(x => {
+      if (item.mediaId && x.mediaId === item.mediaId) return false;
+      if (item.malId && x.malId && Number(x.malId) === Number(item.malId)) return false;
+      if (x.tmdbId === item.tmdbId && (x.mediaType === item.mediaType || !x.mediaType)) return false;
+      return true;
+    });
+    if (this._data.lineup.length !== before) { this._normalizeLineupOrder(); this._saveLineup(); return true; }
+    return false;
+  },
+
+  moveLineupItem(id, direction) {
+    const list = this.getLineup();
+    const idx = list.findIndex(x => x.id === id || x.key === id);
+    if (idx < 0) return false;
+    const next = direction === 'up' ? idx - 1 : idx + 1;
+    if (next < 0 || next >= list.length) return false;
+    [list[idx], list[next]] = [list[next], list[idx]];
+    this._normalizeLineupOrder();
+    this._saveLineup();
+    return true;
+  },
+
+  reorderLineup(ids = []) {
+    if (!Array.isArray(ids) || !ids.length) return false;
+    const current = this.getLineup();
+    const byId = new Map(current.map(x => [x.id, x]));
+    const ordered = ids.map(id => byId.get(id)).filter(Boolean);
+    current.forEach(x => { if (!ids.includes(x.id)) ordered.push(x); });
+    if (ordered.length !== current.length) return false;
+    this._data.lineup = ordered;
+    this._normalizeLineupOrder();
+    this._saveLineup();
+    return true;
+  },
+
+  _normalizeLineupOrder() {
+    this._data.lineup = this.getLineup().map((x, i) => ({ ...x, order: i }));
+  },
+
+  _lineupMediaFor(entry) {
+    if (!entry) return null;
+    if (entry.mediaId) {
+      const byMedia = this.getAll().find(x => x.mediaId === entry.mediaId);
+      if (byMedia) return byMedia;
+    }
+    if (entry.malId) {
+      const anime = this._data.tvshows.find(t => Number(t.malId) === Number(entry.malId)) || this._data.movies.find(m => Number(m.malId) === Number(entry.malId));
+      if (anime) return { ...anime, mediaType: anime.runtime ? 'movie' : 'tv' };
+    }
+    if (entry.mediaType === 'movie') return this._data.movies.find(m => m.tmdbId === entry.tmdbId) || null;
+    return this._data.tvshows.find(t => t.tmdbId === entry.tmdbId) || null;
+  },
+
+  _lineupEntryFinished(entry) {
+    const item = this._lineupMediaFor(entry);
+    if (!item) return true;
+    if ((item.watchStatus || '') === 'completed') return true;
+    if (entry.targetType === 'movie') return (item.watchStatus || '') === 'completed';
+    const seasons = item.seasons || [];
+    if (entry.targetType === 'season') {
+      const sn = Number(entry.seasonNumber || 1);
+      const season = seasons.find(s => Number(s.seasonNumber) === sn);
+      if (!season) return false;
+      const total = season.episodeCount || 0;
+      const watched = season.episodesWatched || 0;
+      const seasonStatus = item.seasonStatuses && item.seasonStatuses[sn];
+      return seasonStatus === 'completed' || (total > 0 && watched >= total);
+    }
+    if (seasons.length) {
+      return seasons.every(s => (s.episodeCount || 0) > 0 && (s.episodesWatched || 0) >= (s.episodeCount || 0));
+    }
+    return false;
+  },
+
+  cleanupLineup() {
+    if (!Array.isArray(this._data.lineup)) this._data.lineup = [];
+    const before = this._data.lineup.length;
+    this._data.lineup = this._data.lineup.filter(e => !this._lineupEntryFinished(e));
+    this._normalizeLineupOrder();
+    if (this._data.lineup.length !== before) this._saveLineup();
+    return { removed: before - this._data.lineup.length, total: this._data.lineup.length };
+  },
 
   getActivity() { return this._data.activity; },
   addActivity(entry) {
@@ -352,7 +606,11 @@ const Store = {
   deleteMovie(id) { this.removeMovie(id); },
   deleteTvShow(id) { this.removeTvShow(id); },
   getTheme() { return this._data.theme; },
-  setTheme(t) { this._data.theme = t; chrome.storage.local.set({ theme: t }); },
+  setTheme(t) {
+    this._data.theme = t;
+    try { localStorage.setItem('watchtracker-theme-cache-v1', JSON.stringify(t || { preset: 'midnight' })); } catch (_) {}
+    chrome.storage.local.set({ theme: t });
+  },
   getPopupPrefs() { return this._data.popupPrefs; },
   setPopupPrefs(p) { this._data.popupPrefs = p; chrome.storage.local.set({ popupPrefs: p }); },
 

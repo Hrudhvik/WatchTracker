@@ -4,6 +4,60 @@
 
 let currentView = 'watchlist';
 
+
+/* Theme-aware SVG icon inliner: external SVG <img> files cannot inherit the
+   surrounding button text color, so local icon SVGs are inlined and colored
+   with currentColor. */
+function initThemeAwareSvgIcons(root = document) {
+  const selector = 'img[src^="icons/"][src$=".svg"]:not([src$="logo.svg"]):not([data-svg-inlined])';
+  const imgs = Array.from(root.querySelectorAll(selector));
+  imgs.forEach(async img => {
+    if (img.dataset.svgInlined) return;
+    img.dataset.svgInlined = 'pending';
+    try {
+      const src = img.getAttribute('src');
+      const res = await fetch(src);
+      if (!res.ok) throw new Error(`Unable to load ${src}`);
+      const text = await res.text();
+      const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+      const svg = doc.querySelector('svg');
+      if (!svg) throw new Error(`Invalid SVG ${src}`);
+      svg.removeAttribute('width');
+      svg.removeAttribute('height');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.setAttribute('focusable', 'false');
+      svg.querySelectorAll('[stroke]').forEach(el => {
+        if ((el.getAttribute('stroke') || '').toLowerCase() !== 'none') el.setAttribute('stroke', 'currentColor');
+      });
+      svg.querySelectorAll('[fill]').forEach(el => {
+        if ((el.getAttribute('fill') || '').toLowerCase() !== 'none') el.setAttribute('fill', 'currentColor');
+      });
+      const icon = document.createElement('span');
+      icon.className = `${img.className || ''} themed-svg-icon`.trim();
+      icon.setAttribute('aria-hidden', 'true');
+      icon.innerHTML = new XMLSerializer().serializeToString(svg);
+      img.replaceWith(icon);
+    } catch (_) {
+      img.dataset.svgInlined = 'failed';
+    }
+  });
+}
+
+function watchThemeAwareSvgIcons() {
+  initThemeAwareSvgIcons();
+  const observer = new MutationObserver(mutations => {
+    for (const mutation of mutations) {
+      mutation.addedNodes.forEach(node => {
+        if (node.nodeType !== 1) return;
+        if (node.matches?.('img[src^="icons/"][src$=".svg"]:not([src$="logo.svg"])')) initThemeAwareSvgIcons(node.parentElement || document);
+        else if (node.querySelector?.('img[src^="icons/"][src$=".svg"]:not([src$="logo.svg"])')) initThemeAwareSvgIcons(node);
+      });
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
+
 function esc(str) {
   if (!str) return '';
   const el = document.createElement('span');
@@ -21,6 +75,116 @@ function toast(msg) {
   setTimeout(() => t.remove(), 2700);
 }
 
+
+
+const LineupUI = {
+  _dragId: null,
+  render() {
+    if (Store.cleanupLineup) Store.cleanupLineup();
+    App.refreshCounts();
+    const page = document.getElementById('page-lineup');
+    if (!page) return;
+    const lineup = (Store.getLineup ? Store.getLineup() : []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+    if (!lineup.length) {
+      page.innerHTML = `<div class="lineup-page"><div class="page-hero"><div><h1>Lineup</h1><p>Your watch-next queue. Add movies, shows, or seasons from details.</p></div></div><div class="empty-state lineup-empty"><h3>Your lineup is empty</h3><p>Open any title and use <strong>Add to Lineup</strong> to build your next watches.</p></div></div>`;
+      return;
+    }
+    page.innerHTML = `<div class="lineup-page"><div class="page-hero"><div><h1>Lineup</h1><p>${lineup.length} item${lineup.length === 1 ? '' : 's'} queued for what to watch next. Drag the handle to reorder.</p></div></div><div class="lineup-list">${lineup.map((entry, idx) => this.card(entry, idx, lineup.length)).join('')}</div></div>`;
+    const listEl = page.querySelector('.lineup-list');
+    const updateRanks = () => {
+      listEl?.querySelectorAll('.lineup-card').forEach((node, i) => {
+        const rank = node.querySelector('.lineup-rank');
+        if (rank) rank.textContent = String(i + 1);
+      });
+    };
+    const persistDomOrder = () => {
+      const ids = [...listEl.querySelectorAll('.lineup-card')].map(el => el.dataset.id).filter(Boolean);
+      const ok = Store.reorderLineup ? Store.reorderLineup(ids) : false;
+      updateRanks();
+      return ok;
+    };
+    page.querySelectorAll('.lineup-card').forEach(card => {
+      const id = card.dataset.id;
+      const openEntry = () => {
+        const entry = Store.getLineup().find(x => x.id === id);
+        if (!entry) return;
+        DetailUI.open(entry.tmdbId, entry.mediaType || (entry.type === 'movie' ? 'movie' : 'tv'));
+      };
+      card.addEventListener('click', ev => {
+        if (ev.target.closest('button') || ev.target.closest('.lineup-drag-handle')) return;
+        openEntry();
+      });
+      card.querySelector('.lineup-remove')?.addEventListener('click', ev => { ev.stopPropagation(); Store.removeFromLineup(id); this.render(); });
+      const handle = card.querySelector('.lineup-drag-handle');
+      handle?.addEventListener('mousedown', () => { card.draggable = true; });
+      handle?.addEventListener('touchstart', () => { card.draggable = true; }, { passive: true });
+      card.addEventListener('dragstart', ev => {
+        this._dragId = id;
+        card.classList.add('dragging');
+        ev.dataTransfer.effectAllowed = 'move';
+        ev.dataTransfer.setData('text/plain', id);
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        card.draggable = false;
+        persistDomOrder();
+        this._dragId = null;
+        this.render();
+      });
+      card.addEventListener('dragover', ev => {
+        ev.preventDefault();
+        const dragging = listEl.querySelector('.lineup-card.dragging');
+        if (!dragging || dragging === card) return;
+        const rect = card.getBoundingClientRect();
+        const after = ev.clientY > rect.top + rect.height / 2;
+        listEl.insertBefore(dragging, after ? card.nextSibling : card);
+        updateRanks();
+      });
+      card.addEventListener('drop', ev => {
+        ev.preventDefault();
+        persistDomOrder();
+        this.render();
+      });
+    });
+  },
+  _entryDetails(entry, item) {
+    const year = (item && (item.year || item.releaseDate || item.firstAirDate || item.release_date || item.first_air_date) || '').toString().slice(0, 4);
+    const source = entry.source === 'mal' || entry.type === 'anime' ? 'MAL' : 'TMDB';
+    const target = entry.targetType === 'season' ? `Season ${entry.seasonNumber}` : entry.mediaType === 'movie' ? 'Movie' : entry.type === 'anime' ? 'Anime' : 'TV Show';
+    let progress = '';
+    if (item && entry.mediaType !== 'movie') {
+      const seasons = item.seasons || [];
+      if (entry.targetType === 'season') {
+        const season = seasons.find(x => Number(x.seasonNumber) === Number(entry.seasonNumber));
+        if (season) progress = `${season.episodesWatched || 0}/${season.episodeCount || '?'} eps`;
+      } else {
+        const watched = seasons.reduce((sum, season) => sum + (season.episodesWatched || 0), 0);
+        const total = seasons.reduce((sum, season) => sum + (season.episodeCount || 0), 0);
+        progress = `${watched}/${total || '?'} eps`;
+      }
+    }
+    return { source, target, meta: [target, year, progress].filter(Boolean) };
+  },
+  card(entry, idx) {
+    const item = Store._lineupMediaFor ? Store._lineupMediaFor(entry) : null;
+    const poster = TMDB.poster((item && item.posterPath) || entry.posterPath, 'w185');
+    const title = esc((item && item.title) || entry.title || 'Untitled');
+    const status = item ? (item.watchStatus || 'plan_to_watch').replaceAll('_', ' ') : 'missing';
+    const details = this._entryDetails(entry, item);
+    const rating = item && (item.userRating || item.rating || item.voteAverage || item.vote_average);
+    const added = entry.addedAt ? new Date(entry.addedAt).toLocaleDateString(undefined, { month:'short', day:'numeric' }) : '';
+    const meta = details.meta.map(x => esc(x)).join(' <span class="lineup-dot">•</span> ');
+    const extra = [rating ? `★ ${esc(String(rating))}` : '', added ? `Added ${esc(added)}` : ''].filter(Boolean).join(' <span class="lineup-dot">•</span> ');
+    return `<article class="lineup-card" data-id="${entry.id}">
+      <button class="lineup-drag-handle" type="button" title="Drag to reorder" aria-label="Drag to reorder"><span></span><span></span><span></span><span></span><span></span><span></span></button>
+      <div class="lineup-rank">${idx + 1}</div>
+      <div class="lineup-poster">${poster ? `<img src="${poster}">` : `<div class="poster-placeholder">${entry.mediaType === 'movie' ? 'MOV' : 'TV'}</div>`}</div>
+      <div class="lineup-info"><h3>${title}</h3><div class="lineup-meta-line"><span class="lineup-source-pill">${esc(details.source)}</span><span>${meta}</span></div><div class="lineup-subrow"><span class="lineup-status">${esc(status)}</span>${extra ? `<span class="lineup-plain-extra">${extra}</span>` : ''}</div></div>
+      <button class="lineup-remove icon-trash-btn" type="button" title="Remove from Lineup" aria-label="Remove from Lineup"><img src="icons/trash.svg" alt=""></button>
+    </article>`;
+  }
+};
+
 const App = {
   _pages: ['movies', 'tvshows', 'lists', 'diary', 'profile', 'activity'],
   _detailReturnContext: null,
@@ -28,7 +192,7 @@ const App = {
   _suppressHashUpdate: false,
 
   _pageHash(name) {
-    const pages = ['watchlist', 'diary', 'recommendations', 'profile', 'activity'];
+    const pages = ['watchlist', 'lineup', 'diary', 'recommendations', 'profile', 'activity'];
     return pages.includes(name) ? `#${name}` : '#watchlist';
   },
 
@@ -72,7 +236,7 @@ const App = {
   _lastScrollPos: {},
 
   showPage(name, opts = {}) {
-    const validPages = ['watchlist', 'diary', 'recommendations', 'profile', 'activity', 'detail'];
+    const validPages = ['watchlist', 'lineup', 'diary', 'recommendations', 'profile', 'activity', 'detail'];
     if (!validPages.includes(name)) name = 'watchlist';
 
     // Keep refresh on the same top-level page without disturbing detail hashes.
@@ -118,6 +282,7 @@ const App = {
     }
     if (name === 'watchlist') ListUI.render();
     else if (name === 'profile') ProfileUI.render();
+    else if (name === 'lineup') LineupUI.render();
     else if (name === 'diary') DiaryUI.render();
     else if (name === 'recommendations') RecommendationsUI.render();
     else if (name === 'activity') ActivityUI.render();
@@ -125,10 +290,13 @@ const App = {
   refreshCounts() {
     const total = Store.getMovies().length + Store.getTvShows().length;
     document.getElementById('totalCount').textContent = total;
+    const lc = document.getElementById('lineupCount');
+    if (lc) lc.textContent = Store.getLineup ? Store.getLineup().length : 0;
   },
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
+  watchThemeAwareSvgIcons();
   await Store.load();
 
   const key = Store.getApiKey();
@@ -162,7 +330,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   } else {
     const pageFromHash = (hash || '#watchlist').replace('#', '');
-    if (['watchlist', 'diary', 'recommendations', 'profile', 'activity'].includes(pageFromHash)) {
+    if (['watchlist', 'lineup', 'diary', 'recommendations', 'profile', 'activity'].includes(pageFromHash)) {
       App.showPage(pageFromHash, { skipHash: true });
     }
   }
@@ -214,13 +382,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   const overlay = document.getElementById('searchOverlay');
   const overlayInput = document.getElementById('overlaySearchInput');
   const overlayResults = document.getElementById('overlayResults');
+  const overlaySourceTabs = document.getElementById('overlaySourceTabs');
   const sidebarInput = document.getElementById('globalSearch');
   let searchTimeout = null;
+  let overlaySearchSource = 'tmdb';
 
   function openSearch(query = '') {
     overlay.classList.remove('hidden');
     overlayInput.value = query || '';
-    overlayResults.innerHTML = '<div class="overlay-msg">Type to search TMDB + MAL</div>';
+    overlayResults.innerHTML = `<div class="overlay-msg">${overlaySearchSource === 'mal' ? 'Type to search Anime / MAL' : overlaySearchSource === 'list' ? 'Type to search your saved list' : 'Type to search TMDB movies and TV shows'}</div>`;
+    overlayInput.placeholder = overlaySearchSource === 'mal' ? 'Search Anime / MAL...' : overlaySearchSource === 'list' ? 'Search your saved watchlist...' : 'Search TMDB movies and TV shows...';
     setTimeout(() => overlayInput.focus(), 50);
     if (query && query.trim().length >= 2) overlayInput.dispatchEvent(new Event('input'));
   }
@@ -273,7 +444,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       malId: id,
       title,
       posterPath: poster,
-      backdropPath: anime?.trailer?.images?.maximum_image_url || null,
+      backdropPath: await overlayMALLandscapeBackdrop(anime, id),
       year: parseInt(year) || 0,
       voteAverage: score || 0,
       runtime: 0,
@@ -393,6 +564,50 @@ document.addEventListener('DOMContentLoaded', async () => {
   function overlayMalYear(anime) { return anime?.year || (anime?.aired?.from ? parseInt(String(anime.aired.from).substring(0, 4)) : 0) || 0; }
   function overlayMalTitle(anime) { return anime?.title_english || anime?.title || anime?.title_japanese || 'Untitled'; }
 
+  function overlayIsLandscapeImageUrl(url) {
+    return new Promise(resolve => {
+      if (!url) { resolve(false); return; }
+      const img = new Image();
+      const finish = ok => { img.onload = img.onerror = null; resolve(ok); };
+      const timer = setTimeout(() => finish(false), 2200);
+      img.onload = () => {
+        clearTimeout(timer);
+        const w = img.naturalWidth || 0;
+        const h = img.naturalHeight || 0;
+        finish(w >= h * 1.15);
+      };
+      img.onerror = () => { clearTimeout(timer); finish(false); };
+      img.src = url;
+    });
+  }
+
+  async function overlayMALAnilistBanner(malId) {
+    if (!malId) return null;
+    try {
+      const query = `query ($idMal: Int) { Media(idMal: $idMal, type: ANIME) { bannerImage } }`;
+      const res = await overlayBgFetch('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ query, variables: { idMal: Number(malId) } })
+      });
+      return res.ok ? (res.body?.data?.Media?.bannerImage || null) : null;
+    } catch (_) { return null; }
+  }
+
+  async function overlayMALLandscapeBackdrop(anime, malId) {
+    // MAL/Jikan does not provide true backdrop images. AniList often has a
+    // native landscape banner for the same MAL id, so prefer that. It is a
+    // single lightweight request and avoids slow /pictures dimension probing.
+    const anilistBanner = await overlayMALAnilistBanner(malId || anime?.mal_id);
+    if (anilistBanner) return anilistBanner;
+
+    return anime?.trailer?.images?.maximum_image_url
+      || anime?.trailer?.images?.large_image_url
+      || anime?.trailer?.images?.medium_image_url
+      || anime?.trailer?.images?.image_url
+      || null;
+  }
+
   async function overlaySearchMALAnime(query) {
     if (!query || query.trim().length < 2) return [];
     const url = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query.trim())}&limit=10&sfw=true&order_by=popularity&sort=asc`;
@@ -438,7 +653,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       externalIds: [{ provider: 'mal', providerType: 'anime', id: Number(malId), relation: 'primary' }],
       title,
       posterPath: poster,
-      backdropPath: anime.trailer?.images?.maximum_image_url || anime.trailer?.images?.large_image_url || null,
+      backdropPath: await overlayMALLandscapeBackdrop(anime, malId),
       year,
       voteAverage: score,
       genres,
@@ -528,6 +743,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     return d;
   }
 
+  if (overlaySourceTabs) overlaySourceTabs.querySelectorAll('.overlay-source-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      overlaySourceTabs.querySelectorAll('.overlay-source-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      overlaySearchSource = tab.dataset.source || 'tmdb';
+      clearTimeout(searchTimeout);
+      openSearch(overlayInput.value.trim());
+    });
+  });
+
   sidebarInput.addEventListener('focus', () => { openSearch(); sidebarInput.blur(); });
 
   document.addEventListener('keydown', (e) => {
@@ -543,28 +768,47 @@ document.addEventListener('DOMContentLoaded', async () => {
   overlayInput.addEventListener('input', () => {
     clearTimeout(searchTimeout);
     const query = overlayInput.value.trim();
-    if (!query) { overlayResults.innerHTML = '<div class="overlay-msg">Type to search TMDB + MAL</div>'; return; }
-    overlayResults.innerHTML = '<div class="overlay-msg">Searching TMDB + MAL...</div>';
+    if (!query) { overlayResults.innerHTML = `<div class="overlay-msg">${overlaySearchSource === 'mal' ? 'Type to search Anime / MAL' : overlaySearchSource === 'list' ? 'Type to search your saved list' : 'Type to search TMDB movies and TV shows'}</div>`; return; }
+    overlayResults.innerHTML = `<div class="overlay-msg">Searching ${overlaySearchSource === 'mal' ? 'Anime / MAL' : overlaySearchSource === 'list' ? 'your list' : 'TMDB'}...</div>`;
 
     searchTimeout = setTimeout(async () => {
       try {
-        const [tmdbRes, malRes] = await Promise.allSettled([
-          TMDB.getKey() ? TMDB.search(query) : Promise.resolve([]),
-          overlaySearchMALAnime(query),
-        ]);
-        const tmdbResults = tmdbRes.status === 'fulfilled' ? tmdbRes.value : [];
-        const malResults = malRes.status === 'fulfilled' ? malRes.value : [];
-        const rows = overlayBlendRows(tmdbResults, malResults);
+        let rows = [];
+        let tmdbErr = '', malErr = '';
+        if (overlaySearchSource === 'list') {
+          const q = query.toLowerCase();
+          rows = Store.getAll().filter(i => (i.title || '').toLowerCase().includes(q)).slice(0, 30).map(i => ({ source: 'list', data: i }));
+        } else if (overlaySearchSource === 'mal') {
+          try { rows = (await overlaySearchMALAnime(query)).map(r => ({ source: 'mal', data: r })); }
+          catch (err) { malErr = err?.message || String(err); }
+        } else {
+          try { rows = (TMDB.getKey() ? await TMDB.search(query) : []).map(r => ({ source: 'tmdb', data: r })); }
+          catch (err) { tmdbErr = err?.message || String(err); }
+        }
 
         if (!rows.length) {
-          const tmdbErr = tmdbRes.status === 'rejected' ? tmdbRes.reason?.message : '';
-          const malErr = malRes.status === 'rejected' ? malRes.reason?.message : '';
           const errText = [tmdbErr, malErr].filter(Boolean).join(' · ');
           overlayResults.innerHTML = `<div class="overlay-msg">No results found${errText ? ` (${esc(errText)})` : ''}</div>`;
           return;
         }
 
         overlayResults.innerHTML = rows.slice(0, 16).map(row => {
+          if (row.source === 'list') {
+            const r = row.data;
+            const isAnime = r.sourceTag === 'anime' || r.syncSource === 'mal-search' || r.malId;
+            const poster = r.posterPath && String(r.posterPath).startsWith('http') ? r.posterPath : TMDB.poster(r.posterPath, 'w92');
+            const status = r.watchStatus ? String(r.watchStatus).replace(/_/g, ' ') : 'Saved';
+            return `
+              <div class="overlay-result-item" data-source="list" data-id="${r.tmdbId}" data-type="${r.mediaType}">
+                ${poster ? `<img src="${poster}">` : `<img src="" style="background:var(--bg-3);">`}
+                <div class="overlay-result-info">
+                  <div class="overlay-result-title">${esc(r.title || 'Untitled')}</div>
+                  <div class="overlay-result-sub">My List · ${isAnime ? 'Anime / MAL' : 'TMDB'} · ${esc(status)}</div>
+                </div>
+                <span class="overlay-type-badge overlay-type-${r.mediaType === 'movie' ? 'movie' : 'tv'}">${isAnime ? 'Anime' : (r.mediaType === 'movie' ? 'Movie' : 'TV')}</span>
+              </div>`;
+          }
+
           if (row.source === 'mal') {
             const r = row.data;
             const malId = Number(r.mal_id);
@@ -783,7 +1027,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <span class="quicklink-chip-name">${esc(link.name)}</span>
           ${isDefault ? '' : `
             <span class="quicklink-chip-actions">
-              <button class="btn-ghost quicklink-icon-btn" type="button" data-action="edit" title="Edit quick link">✎</button>
+              <button class="btn-ghost quicklink-icon-btn" type="button" data-action="edit" title="Edit quick link"><img src="icons/edit.svg" alt=""></button>
               <button class="btn-ghost quicklink-icon-btn" type="button" data-action="remove" title="Remove quick link">×</button>
             </span>`}
         </div>`;
@@ -1371,8 +1615,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('resetTheme').addEventListener('click', () => {
     document.querySelectorAll('.theme-swatch').forEach(b => b.classList.remove('active'));
-    document.querySelector('[data-theme="default"]').classList.add('active');
-    ThemeEngine.applyPreset('default');
+    document.querySelector('[data-theme="midnight"]').classList.add('active');
+    ThemeEngine.applyPreset('midnight');
     toast('Theme reset');
   });
 
@@ -1414,13 +1658,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 const ThemeEngine = {
   presets: {
     default:  { bg0:'#08090c', bg1:'#0e1015', bg2:'#151820', bg3:'#1c2030', bg4:'#242a3a', accent:'#6c5ce7', accentL:'#a29bfe', text0:'#f5f7fb', text1:'#d2d7e2', text2:'#9aa3b7', text3:'#697189', border:'rgba(255,255,255,0.08)' },
-    midnight: { bg0:'#0d1117', bg1:'#161b22', bg2:'#1c2129', bg3:'#21262d', bg4:'#30363d', accent:'#58a6ff', accentL:'#79c0ff', text0:'#f0f6fc', text1:'#c9d1d9', text2:'#8b949e', text3:'#6e7681', border:'rgba(255,255,255,0.08)' },
-    ocean:    { bg0:'#0a192f', bg1:'#112240', bg2:'#162b50', bg3:'#1d3a6a', bg4:'#254980', accent:'#64ffda', accentL:'#88ffea', text0:'#eef7ff', text1:'#c6d9ed', text2:'#8fb0cf', text3:'#6385a4', border:'rgba(255,255,255,0.08)' },
-    forest:   { bg0:'#0b1a0b', bg1:'#132413', bg2:'#1a2e1a', bg3:'#223b22', bg4:'#2d4a2d', accent:'#4ade80', accentL:'#86efac', text0:'#f0fdf4', text1:'#c7e8cf', text2:'#8fc79c', text3:'#6a9b73', border:'rgba(255,255,255,0.08)' },
-    sunset:   { bg0:'#1a0a0a', bg1:'#2d1515', bg2:'#3a1e1e', bg3:'#4a2828', bg4:'#5c3535', accent:'#f97316', accentL:'#fb923c', text0:'#fff7ed', text1:'#ffd4b0', text2:'#d69a75', text3:'#a8755d', border:'rgba(255,255,255,0.08)' },
-    sakura:   { bg0:'#1a0f18', bg1:'#2a1525', bg2:'#351c30', bg3:'#42243d', bg4:'#522e4d', accent:'#f472b6', accentL:'#f9a8d4', text0:'#fff7fb', text1:'#f0c6da', text2:'#c78cab', text3:'#9a6984', border:'rgba(255,255,255,0.08)' },
-    nord:     { bg0:'#2e3440', bg1:'#3b4252', bg2:'#434c5e', bg3:'#4c566a', bg4:'#5a6478', accent:'#88c0d0', accentL:'#8fbcbb', text0:'#f4f6fb', text1:'#e5e9f0', text2:'#b8c4d4', text3:'#8fa2bb', border:'rgba(255,255,255,0.1)' },
-    light:    { bg0:'#f5f5f7', bg1:'#e8e8ed', bg2:'#dddde3', bg3:'#d0d0d8', bg4:'#c0c0cc', accent:'#6c5ce7', accentL:'#5a4bd4', text0:'#111827', text1:'#253047', text2:'#4b5875', text3:'#6b7280', border:'rgba(0,0,0,0.12)' },
+    midnight: { bg0:'#08090c', bg1:'#0e1015', bg2:'#151820', bg3:'#1c2030', bg4:'#242a3a', accent:'#6c5ce7', accentL:'#a29bfe', text0:'#f5f7fb', text1:'#d2d7e2', text2:'#9aa3b7', text3:'#697189', border:'rgba(255,255,255,0.08)' },
+    oled:     { bg0:'#000000', bg1:'#090909', bg2:'#121212', bg3:'#1a1a1a', bg4:'#242424', accent:'#d1d5db', accentL:'#f3f4f6', text0:'#e5e5e5', text1:'#a3a3a3', text2:'#737373', text3:'#525252', border:'rgba(255,255,255,0.08)' },
+    ocean:    { bg0:'#090e17', bg1:'#0f1623', bg2:'#151e2f', bg3:'#1c273c', bg4:'#25324a', accent:'#38bdf8', accentL:'#7dd3fc', text0:'#e2e8f0', text1:'#cbd5e1', text2:'#94a3b8', text3:'#64748b', border:'rgba(255,255,255,0.08)' },
+    nord:     { bg0:'#2e3440', bg1:'#3b4252', bg2:'#434c5e', bg3:'#4c566a', bg4:'#5e6980', accent:'#88c0d0', accentL:'#8fbcbb', text0:'#eceff4', text1:'#e5e9f0', text2:'#d8dee9', text3:'#aebad0', border:'rgba(255,255,255,0.1)' },
+    sakura:   { bg0:'#170f14', bg1:'#23161e', bg2:'#2d1b26', bg3:'#3a2231', bg4:'#492a3e', accent:'#f472b6', accentL:'#fbcfe8', text0:'#fae8f0', text1:'#dfb8ca', text2:'#b3869d', text3:'#876074', border:'rgba(255,255,255,0.08)' },
+    matcha:   { bg0:'#222622', bg1:'#2b302b', bg2:'#343a34', bg3:'#404740', bg4:'#4e574e', accent:'#a3e635', accentL:'#d9f99d', text0:'#e6ebe6', text1:'#c3cbc3', text2:'#95a195', text3:'#717d71', border:'rgba(255,255,255,0.08)' },
+    cloud:    { bg0:'#f8fafc', bg1:'#f1f5f9', bg2:'#e2e8f0', bg3:'#cbd5e1', bg4:'#94a3b8', accent:'#3b82f6', accentL:'#2563eb', text0:'#0f172a', text1:'#1e293b', text2:'#334155', text3:'#475569', border:'rgba(0,0,0,0.1)' },
+    latte:    { bg0:'#faf4ed', bg1:'#f3e8da', bg2:'#e6d5c3', bg3:'#d4bca4', bg4:'#c2a487', accent:'#d97706', accentL:'#b45309', text0:'#453a35', text1:'#5c4c45', text2:'#7a685f', text3:'#99857a', border:'rgba(0,0,0,0.08)' },
   },
 
   init() {
@@ -1515,6 +1760,8 @@ const ThemeEngine = {
     r.setProperty('--text-2', p.text2);
     r.setProperty('--text-3', p.text3);
     r.setProperty('--border', p.border);
+    r.setProperty('--text-color', p.text0);
+    r.setProperty('--accent-color', p.accent);
   },
 
   _applyBg(url, opacity, blur) {
